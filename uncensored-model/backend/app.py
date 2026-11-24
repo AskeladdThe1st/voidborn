@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .runtime import OllamaRuntime, RuntimeErrorLocal, context_messages
+from .runtime import OllamaRuntime, RuntimeErrorLocal, context_messages, model_from_catalog
 from .storage import Store
 from .models import REGISTRY
 
@@ -90,14 +90,19 @@ def create_app(db_path=None, runtime=None):
 
     @app.get('/api/status')
     async def status(model_id: str | None = None):
-        selected = choose(model_id)
-        return await model.status(selected.id)
-
-    def choose(model_id):
         try:
-            return REGISTRY.get(model_id)
+            return await model.status(model_id or REGISTRY.default_model)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    async def choose(model_id):
+        try:
+            return REGISTRY.get(model_id)
+        except ValueError:
+            try:
+                return model_from_catalog(await model.catalog(), model_id)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
 
     @app.get('/api/models')
     async def models():
@@ -171,7 +176,7 @@ def create_app(db_path=None, runtime=None):
             db.execute('DELETE FROM conversations WHERE id=?', (cid,))
 
     async def generate(cid, content=None, model_id=None):
-        selected = choose(model_id)
+        selected = await choose(model_id)
         require_idle()
         conversation = require_conversation(cid)
         history = store.messages(cid)

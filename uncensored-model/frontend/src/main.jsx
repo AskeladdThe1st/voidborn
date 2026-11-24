@@ -36,7 +36,9 @@ function App() {
     setModelId(old => {
       let saved = '';
       try { saved = localStorage.getItem('abyss-model') || localStorage.getItem('local-chat-model') || ''; } catch {}
-      return catalog.models.some(m => m.id === (old || saved)) ? (old || saved) : catalog.default_model;
+      if (catalog.models.some(m => m.id === (old || saved))) return old || saved;
+      const installed = catalog.models.filter(m => m.installed);
+      return (installed.find(m => m.id === catalog.default_model) || installed[0])?.id || catalog.default_model;
     });
   }
   useEffect(() => {
@@ -73,7 +75,7 @@ function App() {
       finally { setLoading(false); }
     })();
     refreshModels().catch(e => setError(e.message));
-    // Pulls happen in Windows Ollama, outside this app. Re-check on return and
+    // Model installs happen outside this app. Re-check on return and
     // periodically while visible so an absent model never stays absent forever.
     const refreshInstalled = () => {
       if (document.visibilityState === 'visible') refreshModels().catch(() => {});

@@ -2,6 +2,27 @@
 
 A personal, text-only React + FastAPI chat application. SQLite stores conversations on this computer. Ollama runs one selected local model at a time. No accounts, telemetry, external fonts, CDNs, cloud APIs, attachments, search, or tools are used by the application.
 
+## macOS setup
+
+Requires Python 3.12+, Node.js 22 with npm, and Ollama installed. From the `uncensored-model` folder:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+(cd frontend && npm ci --no-audit --no-fund && npm run build)
+```
+
+If you migrated a Windows `.venv` with the project, move that environment aside before creating the macOS one.
+
+Quit the Ollama menu bar app if it is running, then start the local-only server in a terminal:
+
+```bash
+OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 OLLAMA_MAX_LOADED_MODELS=1 \
+  OLLAMA_NUM_PARALLEL=1 OLLAMA_CONTEXT_LENGTH=4096 ollama serve
+```
+
+In another terminal, run `./start.sh` from the project folder and open **http://127.0.0.1:8000**. Abyss discovers installed models through Ollama and performs no model downloads. Node is only needed to build the frontend. Chat history is stored in `data/chat.sqlite3`.
+
 ## Windows setup
 
 Requires Python 3.12+, Node.js 22 LTS, and Ollama installed. Dependency installation and the initial model download require internet access; normal chat does not.
@@ -39,13 +60,13 @@ Qwen3.5 9B Abliterated is a new candidate, not a declared winner. Its Q4_K_M bui
 
 The rename to Abyss preserves your browser model preference by migrating the old storage key once. Conversation storage remains at the same `data/chat.sqlite3` path with no schema changes.
 
-Use **Active text model** in the chat header. Your choice is remembered in this browser and applies to the next message or retry, including in existing conversations. Switching does not load a model until a request is sent. The default remains Qwen3 8B until you change it; edit `default_model` in `models.json` to change the fallback for new browsers.
+Use **Active text model** in the chat header. Your choice is remembered in this browser and applies to the next message or retry, including in existing conversations. Switching does not load a model until a request is sent. New browsers prefer the configured default when it is installed, then another installed model if available. Edit `default_model` in `models.json` to change that preference.
 
-Click **Compare models** to send one prompt to every installed model in the registry, sequentially. Each gets fresh context with the same shared system instruction and its own configured generation settings. The panel streams each response and shows total time and time to first token, including model preparation/loading. Score Acceptance, Prompt understanding, Reasoning quality, Hallucination / factual reliability, and Response speed from 1 (poor) to 10 (excellent). Higher factual reliability means fewer hallucinations. Leave any category unrated if you cannot assess it. These are your assessments, not automatic factual verification; Abyss does not calculate a winner or change your selected model based on ratings. Use a known-answer prompt when possible. Lower temperature and an honesty instruction do not guarantee accurate answers or eliminate refusals.
+Click **Compare models** to send one prompt to every installed local model shown in the selector, sequentially. Each gets fresh context with the same shared system instruction and its own configured generation settings. The panel streams each response and shows total time and time to first token, including model preparation/loading. Score Acceptance, Prompt understanding, Reasoning quality, Hallucination / factual reliability, and Response speed from 1 (poor) to 10 (excellent). Higher factual reliability means fewer hallucinations. Leave any category unrated if you cannot assess it. These are your assessments, not automatic factual verification; Abyss does not calculate a winner or change your selected model based on ratings. Use a known-answer prompt when possible. Lower temperature and an honesty instruction do not guarantee accurate answers or eliminate refusals.
 
 Comparison prompts, responses, and ratings stay in page memory, including while returning to chat, and are cleared by reloading. They are not written to SQLite or external services. Existing conversation records and database columns are unchanged. Historical messages are labeled “Assistant”; model provenance is not retroactively assigned or stored. Use separate, clearly named conversations if you want a lasting model comparison record.
 
-All registered models use temperature `0.4`, top_p `0.9`, context `4096`, and maximum output `1024`. Edit their separate `options` in **models.json**, then restart the backend. Add another entry with a unique `id`, friendly `displayName`, exact installed Ollama `ollamaModel`, `no_think` flag, and generation `options` to extend the list. Copy an existing entry as a template. Configuration is validated at startup. `no_think` is the legacy Qwen3 prompt switch and stays false for Gemma and Qwen3.5. Qwen3.5 uses native `think: false` instead; it does not support the old /no_think soft switch. The shared `system_instruction` encourages direct answers, factual restraint, explicit uncertainty, and honesty about absent tools/files/web access.
+All registered models use temperature `0.4`, top_p `0.9`, context `4096`, and maximum output `1024`. Edit their separate `options` in **models.json**, then restart the backend. Add another entry with a unique `id`, friendly `displayName`, exact installed Ollama `ollamaModel`, `no_think` flag, and generation `options` to customize an installed model. Abyss also discovers local models without a registry entry and uses the exact tag as the label with the default generation settings. Copy an existing entry as a template. Configuration is validated at startup. `no_think` is the legacy Qwen3 prompt switch and stays false for Gemma and Qwen3.5. Qwen3.5 uses native `think: false` instead; it does not support the old /no_think soft switch. The shared `system_instruction` encourages direct answers, factual restraint, explicit uncertainty, and honesty about absent tools/files/web access.
 
 Download weights explicitly with Ollama before testing; the app never downloads models. Click **Refresh models** after installing one. Uninstalled entries are labeled and excluded from comparisons. The model dropdown never sends an arbitrary user-supplied runtime URL.
 

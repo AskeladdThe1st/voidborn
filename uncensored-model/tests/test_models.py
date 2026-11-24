@@ -14,6 +14,43 @@ from test_app import FakeRuntime
 
 
 class SelectionTests(unittest.TestCase):
+    def test_discovers_and_runs_unregistered_local_model(self):
+        tag = 'local-test:latest'
+        tags = []
+
+        def handler(request):
+            path = request.url.path
+            if path == '/api/tags':
+                return httpx.Response(200, json={'models': tags})
+            if path == '/api/show':
+                self.assertEqual(json.loads(request.content), {'model': tag})
+                return httpx.Response(200, json={'model_info': {'general.architecture': 'test'}})
+            if path == '/api/ps':
+                return httpx.Response(200, json={'models': []})
+            self.assertEqual(path, '/api/chat')
+            self.assertEqual(json.loads(request.content)['model'], tag)
+            return httpx.Response(200, text='{"message":{"content":"Hi"}}\n{"done":true}\n')
+
+        runtime = OllamaRuntime()
+        runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', transport=httpx.MockTransport(handler))
+        with tempfile.TemporaryDirectory() as folder:
+            with TestClient(create_app(Path(folder) / 'chat.sqlite3', runtime)) as client:
+                self.assertFalse(any(m['installed'] for m in client.get('/api/models').json()['models']))
+                tags.extend([{'name': tag}, {'name': 'remote:latest', 'remote_host': 'example.com'}])
+                installed = [m for m in client.get('/api/models').json()['models'] if m['installed']]
+                self.assertEqual([m['displayName'] for m in installed], [tag])
+                model_id = installed[0]['id']
+                self.assertTrue(client.get('/api/status', params={'model_id': model_id}).json()['ready'])
+                cid = client.post('/api/conversations').json()['id']
+                message = {'content': 'Hello', 'model_id': model_id}
+                response = client.post(f'/api/conversations/{cid}/messages', json=message)
+                self.assertEqual(json.loads(response.text.splitlines()[-1])['type'], 'done')
+                comparison = client.post('/api/compare', json=message)
+                self.assertEqual(json.loads(comparison.text.splitlines()[0])['model_id'], model_id)
+                self.assertEqual(json.loads(comparison.text.splitlines()[-2])['type'], 'result')
+                tags.clear()
+                self.assertEqual(client.get('/api/status', params={'model_id': model_id}).status_code, 422)
+
     def test_comparison_skips_missing_models_and_reports_no_models(self):
         class InstalledRuntime(FakeRuntime):
             none_installed = False

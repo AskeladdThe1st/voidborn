@@ -1,14 +1,38 @@
 """The only model adapter. No remote fallback or automatic downloads."""
 import json
 import asyncio
-from .models import REGISTRY
+from hashlib import sha256
+
 import httpx
+from pydantic import ValidationError
+
+from .models import REGISTRY, TextModel
 
 RUNTIME_URL = 'http://127.0.0.1:11434'
 
 
 class RuntimeErrorLocal(Exception):
     pass
+
+
+def discovered_models(tags):
+    registered_tags = {model.ollamaModel for model in REGISTRY.models}
+    registered_ids = {model.id for model in REGISTRY.models}
+    for tag in sorted(tags - registered_tags):
+        model_id = 'ollama-' + sha256(tag.encode('utf-8')).hexdigest()
+        if model_id in registered_ids:
+            continue
+        try:
+            yield TextModel(id=model_id, displayName=tag, ollamaModel=tag)
+        except ValidationError:
+            continue
+
+
+def model_from_catalog(catalog, model_id):
+    for entry in catalog['models']:
+        if entry['id'] == model_id:
+            return TextModel.model_validate({key: value for key, value in entry.items() if key != 'installed'})
+    raise ValueError('Unknown model ID')
 
 
 class OllamaRuntime:
@@ -21,16 +45,18 @@ class OllamaRuntime:
             async with self.client() as client:
                 response = await client.get('/api/tags', timeout=3)
                 response.raise_for_status()
-                tags = {m.get('name') for m in response.json().get('models', [])}
+                tags = {m['name'] for m in response.json().get('models', [])
+                        if isinstance(m.get('name'), str) and not (m.get('remote_host') or m.get('remote_model'))}
             return {'default_model': REGISTRY.default_model, 'available': True,
-                    'models': [{**m.model_dump(), 'installed': m.ollamaModel in tags} for m in REGISTRY.models]}
+                    'models': [{**m.model_dump(), 'installed': m.ollamaModel in tags}
+                               for m in [*REGISTRY.models, *discovered_models(tags)]]}
         except (httpx.HTTPError, ValueError):
             return {'default_model': REGISTRY.default_model, 'available': False,
                     'models': [{**m.model_dump(), 'installed': False} for m in REGISTRY.models]}
 
     async def status(self, model_id=None):
-        selected = REGISTRY.get(model_id)
         catalog = await self.catalog()
+        selected = model_from_catalog(catalog, model_id or REGISTRY.default_model)
         ready = next(m['installed'] for m in catalog['models'] if m['id'] == selected.id)
         return {'ready': ready, 'model': selected.ollamaModel,
                 'detail': 'Ready' if ready else ('Model not installed. Follow README setup.' if catalog['available'] else 'Ollama is unavailable at 127.0.0.1:11434.')}
@@ -64,7 +90,13 @@ class OllamaRuntime:
             raise RuntimeErrorLocal('Another model is still loaded. Wait briefly and retry.')
 
     async def stream(self, messages, model_id=None):
-        selected = REGISTRY.get(model_id)
+        try:
+            selected = REGISTRY.get(model_id)
+        except ValueError:
+            try:
+                selected = model_from_catalog(await self.catalog(), model_id)
+            except ValueError as exc:
+                raise RuntimeErrorLocal('Selected model is no longer available. Refresh Models and try again.') from exc
         instruction = REGISTRY.system_instruction + ('\n/no_think' if selected.no_think else '')
         messages = [{'role': 'system', 'content': instruction}, *messages]
         prefix, at_start = '', selected.no_think
