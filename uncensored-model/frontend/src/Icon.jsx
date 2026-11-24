@@ -8,6 +8,7 @@ const paths = {
   refresh: 'M20 10a8 8 0 0 0-14-4L3 9m0-5v5h5m-4 5a8 8 0 0 0 14 4l3-3m0 5v-5h-5',
   edit: 'm4 16-1 5 5-1L21 7l-4-4zM14 6l4 4',
   trash: 'M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7',
+  microphone: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0zM5 11v1a7 7 0 0 0 14 0v-1M12 19v3m-3 0h6',
   paperclip: 'm20 11-8 8a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8',
   file: 'M5 3h9l5 5v13H5zM14 3v6h5M8 13h8m-8 4h8',
   image: 'M3 4h18v16H3zM3 16l5-5 4 4 3-3 6 6M16 8h.01',

@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .attachments import AttachmentError, attach_sources, parse_upload, remove_orphans, remove_upload, save_uploads, stored_path
+from .dictation import dictation_router
 from .runtime import OllamaRuntime, RuntimeErrorLocal, VISION_MISSING, VISION_MODEL, context_messages, model_from_catalog
 from .storage import Store
 from .models import REGISTRY
@@ -78,6 +79,7 @@ def create_app(db_path=None, runtime=None):
         response.headers['Content-Security-Policy'] = "default-src 'self'; connect-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
+        response.headers['Permissions-Policy'] = 'microphone=(self)'
         response.headers['Cache-Control'] = 'no-store'
         return response
 
@@ -332,6 +334,8 @@ def create_app(db_path=None, runtime=None):
             return await generate(cid, model_id=body.model_id if body else None)
         except AttachmentError as exc:
             raise HTTPException(exc.status, str(exc)) from exc
+
+    app.include_router(dictation_router())
 
     if (ROOT / 'frontend' / 'dist').exists():
         app.mount('/', StaticFiles(directory=ROOT / 'frontend' / 'dist', html=True), name='frontend')

@@ -5,6 +5,7 @@ import './models.css';
 import Comparison from './Comparison';
 import Icon from './Icon';
 import MessageContent from './MessageContent';
+import Dictation from './Dictation';
 import { ACCEPT_ATTACHMENTS, MAX_ATTACHMENTS, DraftAttachments, MessageAttachments, attachmentError, isImageAttachment, pastedImages } from './Attachments';
 
 async function api(path, options = {}) {
@@ -32,6 +33,8 @@ function App() {
   const [runtimeAvailable, setRuntimeAvailable] = useState(null);
   const [vision, setVision] = useState(null);
   const [attachments, setAttachments] = useState([]);
+  const [dictating, setDictating] = useState(false);
+  const composerInput = useRef(null);
   const filePicker = useRef(null);
   const historyToggle = useRef(null);
   const historyClose = useRef(null);
@@ -82,7 +85,7 @@ function App() {
   const hasImage = attachments.some(item => isImageAttachment(item.file));
   const retryHasImage = interrupted && messages.findLast(m => m.role === 'user')?.attachments?.some(isImageAttachment);
   const canEdit = Boolean(current && !busy && !loading && !interrupted);
-  const canSend = canEdit && (hasImage ? vision?.installed : selectedModel?.installed) &&
+  const canSend = canEdit && !dictating && (hasImage ? vision?.installed : selectedModel?.installed) &&
     (bytes > 0 || attachments.length > 0) && bytes <= 2500;
   const canRetry = !busy && !loading && (retryHasImage ? vision?.installed : selectedModel?.installed);
 
@@ -310,12 +313,17 @@ function App() {
         {attachments.length > 0 && <DraftAttachments items={attachments} disabled={busy} onRemove={id => {
           setAttachments(items => items.filter(item => item.id !== id)); setError('');
         }}/>}
-        <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+        <form className={dictating ? 'composer composer-dictating' : 'composer'} onSubmit={e => { e.preventDefault(); send(); }}>
           <input type="file" ref={filePicker} accept={ACCEPT_ATTACHMENTS} multiple hidden
             onChange={e => { addAttachments(e.target.files); e.target.value = ''; }}/>
           <button type="button" className="icon-button attach-button" aria-label="Attach files" title="Attach files"
             disabled={!canEdit} onClick={() => filePicker.current?.click()}><Icon name="paperclip"/></button>
-          <textarea aria-label="Message" aria-describedby="composer-status" placeholder="Transmit a message to Abyss..." value={input}
+          {!comparing && <Dictation key={current} disabled={!canEdit} onActiveChange={setDictating} onError={setError}
+            onTranscript={text => {
+              setInput(previous => previous && !/\s$/.test(previous) ? `${previous} ${text}` : previous + text);
+              composerInput.current?.focus();
+            }}/>}
+          <textarea ref={composerInput} aria-label="Message" aria-describedby="composer-status" placeholder="Transmit a message to Abyss..." value={input}
             disabled={!canEdit} onChange={e => setInput(e.target.value)}
             onPaste={e => {
               const images = pastedImages(e.clipboardData);

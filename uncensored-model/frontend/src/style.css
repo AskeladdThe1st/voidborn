@@ -347,3 +347,27 @@ main::before {
 .attachment-info .limit { color: #ffc0a0; overflow-wrap: anywhere; }
 .attachment a { flex-shrink: 0; color: #ff9da1; }
 .attachment-remove { width: 30px; height: 32px; flex-shrink: 0; }
+
+.composer-dictating { flex-wrap: wrap; }
+.dictation-controls {
+  order: 1;
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: .85rem;
+}
+.dictation-controls button { padding: 5px 9px; }
+.dictation-recording { color: #ff9da1; }
+.dictation-recording::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #ff414c;
+  content: "";
+}
+.dictation-controls time { font-variant-numeric: tabular-nums; }

@@ -54,6 +54,18 @@ Open **http://127.0.0.1:8000**. Create a conversation and send a message. Enter 
 
 The launch command performs no installation or network downloads. The React build is served by FastAPI; no Node process is needed at runtime. After editing React files, run `npm.cmd run build` inside `frontend`, then restart the backend.
 
+## Local voice dictation
+
+Open a conversation and click the microphone beside the paperclip. Allow microphone access in the browser, then click **Stop** to transcribe or **Cancel** to discard. The transcript is appended to the draft for editing. Sending still requires the usual Send action.
+
+Dictation uses multilingual Whisper Small (`mlx-community/whisper-small-mlx`, about 481 MB) with MLX Whisper on Apple Silicon. The Python dependencies are installed through `requirements.txt`. The app only loads the local checkpoint in `data/models/whisper-small-mlx/`. To install the optional model explicitly from the project folder:
+
+```bash
+HF_HUB_DISABLE_TELEMETRY=1 .venv/bin/hf download mlx-community/whisper-small-mlx config.json weights.npz --local-dir data/models/whisper-small-mlx
+```
+
+Recordings are limited to two minutes. The browser captures mono 16 kHz WAV, and the backend processes it in memory and returns only text. Dictation requires loopback access in a browser with Web Audio support. Leaving the conversation, switching tabs, or canceling stops capture and discards the in-progress draft recording.
+
 ## Local attachments and vision
 
 Open a conversation, then click the paperclip, drop files into the composer, or paste a screenshot into the message box. To ask about an attachment, include your question in the same message. Up to five files can be added, previewed, and removed before sending. Saved images can be opened or downloaded from chat history. Documents can be downloaded.
