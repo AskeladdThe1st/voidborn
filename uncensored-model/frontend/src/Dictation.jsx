@@ -169,8 +169,8 @@ export default function Dictation({ disabled, onTranscript, onActiveChange, onEr
   }
 
   if (phase === 'idle') {
-    return <button type="button" className="icon-button attach-button" disabled={disabled}
-      aria-label="Start dictation" title="Start dictation" onClick={start}><Icon name="microphone"/></button>;
+    return <button type="button" className="icon-button composer-icon" disabled={disabled}
+      aria-label="Start dictation" title="Start dictation" onClick={start}><Icon name="microphone" size={19}/></button>;
   }
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   return <div className="dictation-controls">

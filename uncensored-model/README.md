@@ -56,7 +56,7 @@ The launch command performs no installation or network downloads. The React buil
 
 ## Local voice dictation
 
-Open a conversation and click the microphone beside the paperclip. Allow microphone access in the browser, then click **Stop** to transcribe or **Cancel** to discard. The transcript is appended to the draft for editing. Sending still requires the usual Send action.
+Open a conversation and click the microphone beside Send. Allow microphone access in the browser, then click **Stop** to transcribe or **Cancel** to discard. The transcript is appended to the draft for editing. Sending still requires the usual Send action.
 
 Dictation uses multilingual Whisper Small (`mlx-community/whisper-small-mlx`, about 481 MB) with MLX Whisper on Apple Silicon. The Python dependencies are installed through `requirements.txt`. The app only loads the local checkpoint in `data/models/whisper-small-mlx/`. To install the optional model explicitly from the project folder:
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import './models.css';
@@ -35,6 +35,8 @@ function App() {
   const [attachments, setAttachments] = useState([]);
   const [dictating, setDictating] = useState(false);
   const composerInput = useRef(null);
+  const generation = useRef(null);
+  const [stopping, setStopping] = useState(false);
   const filePicker = useRef(null);
   const historyToggle = useRef(null);
   const historyClose = useRef(null);
@@ -88,6 +90,18 @@ function App() {
   const canSend = canEdit && !dictating && (hasImage ? vision?.installed : selectedModel?.installed) &&
     (bytes > 0 || attachments.length > 0) && bytes <= 2500;
   const canRetry = !busy && !loading && (retryHasImage ? vision?.installed : selectedModel?.installed);
+
+  useLayoutEffect(() => {
+    const textarea = composerInput.current;
+    if (!textarea || comparing) return;
+    const resize = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [input, comparing]);
 
   function addAttachments(files) {
     if (!canEdit) return;
@@ -166,7 +180,9 @@ function App() {
     finally { setLoading(false); }
   }
   async function send(retry = false) {
-    if (retry ? !canRetry : !canSend) return;
+    if (generation.current || (retry ? !canRetry : !canSend)) return;
+    const controller = new AbortController();
+    generation.current = controller;
     setBusy(true); setError('');
     const cid = current;
     const content = input.trim();
@@ -183,7 +199,9 @@ function App() {
         body = JSON.stringify(retry ? { model_id: modelId } : { content, model_id: modelId });
       }
       const path = retry ? 'retry' : multipart ? 'messages/attachments' : 'messages';
-      const response = await fetch(`/api/conversations/${cid}/${path}`, { method: 'POST', headers, body });
+      const response = await fetch(`/api/conversations/${cid}/${path}`, {
+        method: 'POST', headers, body, signal: controller.signal,
+      });
       if (!response.ok) { const data = await response.json(); throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not send message.'); }
       if (!retry) { setInput(''); setAttachments([]); }
       setMessages(old => [...(retry ? old.slice(0, -1) : [...old, { id: 'user-pending', role: 'user', content, status: 'complete' }]), { id: 'pending', role: 'assistant', content: '', status: 'streaming' }]);
@@ -208,11 +226,24 @@ function App() {
         }
         if (!completed) throw new Error('Response interrupted. Retry to generate it again.');
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      if (!controller.signal.aborted) setError(e.message);
+    }
     finally {
-      try { const chat = await api(`/conversations/${cid}`); setMessages(chat.messages); await refresh(); }
+      try {
+        let chat = await api(`/conversations/${cid}`);
+        // Let the backend finish saving the interrupted reply after disconnect.
+        for (let attempt = 0; controller.signal.aborted && chat.messages.at(-1)?.status === 'streaming' && attempt < 10; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 75));
+          chat = await api(`/conversations/${cid}`);
+        }
+        setMessages(chat.messages);
+        await refresh();
+      }
       catch { setError(currentError => currentError || 'Connection lost. Reload to restore saved messages.'); }
       api(`/status?model_id=${encodeURIComponent(modelId)}`).then(setStatus).catch(() => {});
+      generation.current = null;
+      setStopping(false);
       setBusy(false);
     }
   }
@@ -262,7 +293,7 @@ function App() {
         </div>
       </header>
 
-      <div className="channel">
+      <div className={comparing ? 'channel' : 'channel conversation-channel'}>
         <h1><span aria-hidden="true">//</span> {comparing ? 'Model comparison' : 'Conversation'}</h1>
         {!comparing && active && <span className="channel-title" title={active.title}>{active.title}</span>}
       </div>
@@ -313,24 +344,34 @@ function App() {
         {attachments.length > 0 && <DraftAttachments items={attachments} disabled={busy} onRemove={id => {
           setAttachments(items => items.filter(item => item.id !== id)); setError('');
         }}/>}
-        <form className={dictating ? 'composer composer-dictating' : 'composer'} onSubmit={e => { e.preventDefault(); send(); }}>
+        <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
           <input type="file" ref={filePicker} accept={ACCEPT_ATTACHMENTS} multiple hidden
             onChange={e => { addAttachments(e.target.files); e.target.value = ''; }}/>
-          <button type="button" className="icon-button attach-button" aria-label="Attach files" title="Attach files"
-            disabled={!canEdit} onClick={() => filePicker.current?.click()}><Icon name="paperclip"/></button>
-          {!comparing && <Dictation key={current} disabled={!canEdit} onActiveChange={setDictating} onError={setError}
-            onTranscript={text => {
-              setInput(previous => previous && !/\s$/.test(previous) ? `${previous} ${text}` : previous + text);
-              composerInput.current?.focus();
-            }}/>}
-          <textarea ref={composerInput} aria-label="Message" aria-describedby="composer-status" placeholder="Transmit a message to Abyss..." value={input}
+          <textarea ref={composerInput} rows={1} aria-label="Message" aria-describedby="composer-status" placeholder="Message Abyss..." value={input}
             disabled={!canEdit} onChange={e => setInput(e.target.value)}
             onPaste={e => {
               const images = pastedImages(e.clipboardData);
               if (images.length) { e.preventDefault(); addAttachments(images); }
             }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}/>
-          <button className="send" title="Send message" aria-label="Send message" disabled={!canSend}>{busy ? '…' : <Icon name="send" size={28}/>}</button>
+          <div className="composer-tools">
+            <button type="button" className="icon-button composer-icon" aria-label="Attach files" title="Attach files"
+              disabled={!canEdit} onClick={() => filePicker.current?.click()}><Icon name="plus" size={20}/></button>
+            <div className="composer-actions">
+              {!comparing && <Dictation key={current} disabled={!canEdit} onActiveChange={setDictating} onError={setError}
+                onTranscript={text => {
+                  setInput(previous => previous && !/\s$/.test(previous) ? `${previous} ${text}` : previous + text);
+                  composerInput.current?.focus();
+                }}/>}
+              {busy ? <button type="button" className="send" title="Stop generation" aria-label="Stop generation"
+                disabled={stopping || !generation.current} onClick={() => {
+                  setStopping(true);
+                  generation.current?.abort();
+                }}><Icon name="stop" size={16}/></button>
+                : <button type="submit" className="send" title="Send message" aria-label="Send message"
+                  disabled={!canSend}><Icon name="send" size={20}/></button>}
+            </div>
+          </div>
         </form>
         <div className="composer-status" id="composer-status">
           <span>{hasImage || retryHasImage

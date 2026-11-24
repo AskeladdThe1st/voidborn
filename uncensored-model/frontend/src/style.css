@@ -196,7 +196,11 @@ main::before {
 .welcome h2 { margin: 15px 0 19px; font-size: clamp(24px, 2.6vw, 41px); font-weight: 500; text-shadow: 0 2px 16px #000; }
 .primary { display: inline-flex; align-items: center; gap: 10px; background: #30171c; border-color: #98323b; }
 
-.messages { width: min(100%, 1030px); padding: 10px var(--gutter) 23px; }
+.conversation-channel, .messages, .composer-area {
+  width: min(100%, calc(800px + 2 * var(--gutter)));
+  margin-inline: auto;
+}
+.messages { padding: 10px var(--gutter) 23px; }
 .message {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
@@ -235,48 +239,70 @@ main::before {
 .rename { display: flex; gap: 8px; padding: 0 var(--gutter) 12px; }
 .rename input { flex: 1; min-width: 0; padding: 8px; border-radius: 5px; }
 
-.composer-area { padding: 10px var(--gutter) clamp(12px, 4.4dvh, 44px); }
-.composer {
-  position: relative;
-  isolation: isolate;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 82px;
-  padding: 13px 16px 13px 25px;
+.composer-area {
+  padding: 8px var(--gutter) clamp(12px, 2.6dvh, 26px);
 }
-.composer::before, .composer::after { position: absolute; content: ""; inset: 0; z-index: -1; clip-path: var(--chamfer); }
-.composer::before { background: #a2353e; }
-.composer::after { inset: 1px; background: #111216; }
-.composer:focus-within::before { background: #ff5860; }
+.composer {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px 8px;
+  border: 1px solid #b72b34;
+  border-radius: 20px;
+  background: #101820cc;
+  transition: border-color 140ms ease;
+}
+.composer:hover, .composer:focus-within { border-color: #ff3c46; }
 .composer textarea {
   display: block;
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  min-height: 38px;
-  height: 48px;
-  max-height: 155px;
-  padding: 10px 0 0 14px;
+  min-height: 30px;
+  max-height: min(30dvh, 168px);
+  padding: 4px 5px 3px;
+  color: #d5d8e1;
   background: transparent;
   border: 0;
-  border-left: 1px solid #8e555a;
-  outline: 0;
-  font-size: clamp(.95rem, 1.18vw, 1.27rem);
-  line-height: 1.4;
-  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
 }
-.send {
+.composer textarea::placeholder { color: #9da3af; }
+.composer-tools, .composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.composer-tools { justify-content: space-between; }
+.composer-actions { justify-content: flex-end; }
+.composer .composer-icon, .composer .send {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.composer .composer-icon { color: #c6cad5; background: transparent; }
+.composer .composer-icon:not(:disabled):hover { background: #202735; }
+.composer .composer-icon:not(:disabled):active { background: #2a3140; }
+.composer-actions .composer-icon:not(:disabled):hover,
+.composer-actions .composer-icon:not(:disabled):active { color: #ff3c46; background: transparent; }
+.composer .send {
   display: grid;
   place-items: center;
-  width: 57px;
-  height: 51px;
-  padding: 0;
-  border: 1px solid #98323b;
-  border-radius: 10px;
-  background: #36181e;
-  color: var(--red);
+  color: #f0e5eb;
+  background: #b72b34;
 }
-.send:disabled { opacity: .64; }
+.composer .send:not(:disabled):hover { background: #ff3c46; color: #160b0d; }
+.composer .send:not(:disabled):active { background: #98242c; }
+.composer .send:disabled { color: #8f7e84; background: #321a20; opacity: 1; }
+.composer button:focus-visible { outline-color: #b8bac4; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .composer, .composer .composer-icon, .composer .send { transition: none; }
+}
 .composer-status { display: flex; justify-content: space-between; gap: 12px; margin: 9px 2px 0; color: var(--muted); font-size: .75rem; }
 .error, .retry-row { padding: 10px 13px; margin: 0 0 10px; border: 1px solid #76333b; border-radius: 6px; background: #251319f2; color: #ffd1c8; }
 .retry-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -307,9 +333,6 @@ main::before {
   .speaker strong { font-size: .95rem; }
   .speaker-role { font-size: .74rem; }
   .speaker time { font-size: .72rem; }
-  .composer { min-height: 64px; padding: 8px 10px 8px 13px; }
-  .composer textarea { height: 44px; }
-  .send { width: 43px; height: 43px; }
   .keyboard-hint { display: none; }
 }
 @media (max-height: 600px) {
@@ -318,7 +341,6 @@ main::before {
   aside { padding-bottom: 12px; }
 }
 
-.attach-button { flex-shrink: 0; }
 .attachment-list {
   display: flex;
   flex-wrap: wrap;
@@ -348,26 +370,24 @@ main::before {
 .attachment a { flex-shrink: 0; color: #ff9da1; }
 .attachment-remove { width: 30px; height: 32px; flex-shrink: 0; }
 
-.composer-dictating { flex-wrap: wrap; }
 .dictation-controls {
-  order: 1;
-  flex: 1 0 100%;
   display: flex;
+  justify-content: flex-end;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--muted);
   font-size: .85rem;
 }
-.dictation-controls button { padding: 5px 9px; }
-.dictation-recording { color: #ff9da1; }
+.dictation-controls button { padding: 4px 7px; min-height: 32px; }
+.dictation-recording { color: #e6a2ae; }
 .dictation-recording::before {
   display: inline-block;
   width: 7px;
   height: 7px;
   margin-right: 7px;
   border-radius: 50%;
-  background: #ff414c;
+  background: #c65468;
   content: "";
 }
 .dictation-controls time { font-variant-numeric: tabular-nums; }
