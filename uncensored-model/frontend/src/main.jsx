@@ -5,6 +5,7 @@ import './models.css';
 import Comparison from './Comparison';
 import Icon from './Icon';
 import MessageContent from './MessageContent';
+import { ACCEPT_ATTACHMENTS, MAX_ATTACHMENTS, DraftAttachments, MessageAttachments, attachmentError, isImageAttachment, pastedImages } from './Attachments';
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { cache: 'no-store', ...options, headers: { 'Content-Type': 'application/json' } });
@@ -29,6 +30,9 @@ function App() {
   const [comparing, setComparing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [runtimeAvailable, setRuntimeAvailable] = useState(null);
+  const [vision, setVision] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const filePicker = useRef(null);
   const historyToggle = useRef(null);
   const historyClose = useRef(null);
   const selectedModel = models.find(m => m.id === modelId);
@@ -48,6 +52,7 @@ function App() {
     if (request !== modelRefresh.current) return;
     setModels(catalog.models);
     setRuntimeAvailable(catalog.available);
+    setVision(catalog.vision);
     setModelId(old => {
       let saved = '';
       try { saved = localStorage.getItem('abyss-model') || localStorage.getItem('local-chat-model') || ''; } catch {}
@@ -69,9 +74,34 @@ function App() {
   const selection = useRef(0);
   const active = conversations.find(c => c.id === current);
   const runtimeLabel = runtimeAvailable === null ? 'Checking connection…' : runtimeAvailable
-    ? (models.some(m => m.installed) ? 'Connected' : 'Connected · no models installed') : 'Offline';
-  const interrupted = messages.length > 0 && messages.at(-1).status !== 'complete';
+    ? (vision?.installed || models.some(m => m.installed) ? 'Connected' : 'Connected · no models installed') : 'Offline';
+  const latest = messages.at(-1);
+  const interrupted = Boolean(latest && (latest.status !== 'complete' ||
+    (latest.role === 'assistant' && !latest.content.trim())));
   const bytes = new TextEncoder().encode(input.trim()).length;
+  const hasImage = attachments.some(item => isImageAttachment(item.file));
+  const retryHasImage = interrupted && messages.findLast(m => m.role === 'user')?.attachments?.some(isImageAttachment);
+  const canEdit = Boolean(current && !busy && !loading && !interrupted);
+  const canSend = canEdit && (hasImage ? vision?.installed : selectedModel?.installed) &&
+    (bytes > 0 || attachments.length > 0) && bytes <= 2500;
+  const canRetry = !busy && !loading && (retryHasImage ? vision?.installed : selectedModel?.installed);
+
+  function addAttachments(files) {
+    if (!canEdit) return;
+    const accepted = [], errors = [];
+    for (const file of files) {
+      const invalid = attachmentError(file);
+      if (invalid) errors.push(invalid);
+      else if (attachments.length + accepted.length >= MAX_ATTACHMENTS) {
+        errors.push('You can attach up to five files per message.');
+        break;
+      } else {
+        accepted.push({ id: crypto.randomUUID(), file });
+      }
+    }
+    setAttachments([...attachments, ...accepted]);
+    setError(errors.join(' '));
+  }
 
   async function refresh() { setConversations(await api('/conversations')); }
   async function open(id) {
@@ -80,7 +110,7 @@ function App() {
     try {
       const data = await api(`/conversations/${id}`);
       if (ticket === selection.current) {
-        setCurrent(id); setMessages(data.messages); setComparing(false);
+        setCurrent(id); setMessages(data.messages); setComparing(false); setAttachments([]);
         if (historyOpen) closeHistory();
       }
     } catch (e) { setError(e.message); }
@@ -124,32 +154,44 @@ function App() {
     catch (e) { setError(e.message); }
   }
   async function remove() {
-    if (!window.confirm(`Delete “${active.title}” and its messages? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete “${active.title}”, its messages, and attachments? This cannot be undone.`)) return;
     setLoading(true);
     try {
       await api(`/conversations/${current}`, { method: 'DELETE' });
-      setCurrent(null); setMessages([]); setInput(''); setEditing(false); await refresh();
+      setCurrent(null); setMessages([]); setInput(''); setAttachments([]); setEditing(false); await refresh();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
   async function send(retry = false) {
-    if (busy || loading || !current || !selectedModel?.installed || (!retry && (!bytes || bytes > 2500))) return;
+    if (retry ? !canRetry : !canSend) return;
     setBusy(true); setError('');
     const cid = current;
     const content = input.trim();
     try {
-      const response = await fetch(`/api/conversations/${cid}/${retry ? 'retry' : 'messages'}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(retry ? { model_id: modelId } : { content, model_id: modelId }),
-      });
+      const multipart = !retry && attachments.length > 0;
+      let body, headers;
+      if (multipart) {
+        body = new FormData();
+        body.append('content', content);
+        if (modelId) body.append('model_id', modelId);
+        attachments.forEach(({ file }) => body.append('files', file));
+      } else {
+        headers = { 'Content-Type': 'application/json' };
+        body = JSON.stringify(retry ? { model_id: modelId } : { content, model_id: modelId });
+      }
+      const path = retry ? 'retry' : multipart ? 'messages/attachments' : 'messages';
+      const response = await fetch(`/api/conversations/${cid}/${path}`, { method: 'POST', headers, body });
       if (!response.ok) { const data = await response.json(); throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not send message.'); }
-      if (!retry) setInput('');
+      if (!retry) { setInput(''); setAttachments([]); }
       setMessages(old => [...(retry ? old.slice(0, -1) : [...old, { id: 'user-pending', role: 'user', content, status: 'complete' }]), { id: 'pending', role: 'assistant', content: '', status: 'streaming' }]);
       const reader = response.body.getReader(), decoder = new TextDecoder();
       let buffer = '', completed = false;
       function consume(line) {
         if (!line.trim()) return;
         const event = JSON.parse(line);
+        if (event.type === 'start' && event.attachments) {
+          setMessages(old => old.map(m => m.id === 'user-pending' ? { ...m, attachments: event.attachments } : m));
+        }
         if (event.type === 'delta') setMessages(old => old.map((m, i) => i === old.length - 1 ? { ...m, content: m.content + event.content } : m));
         if (event.type === 'done') completed = true;
         if (event.type === 'error') throw new Error(event.detail);
@@ -166,7 +208,7 @@ function App() {
     } catch (e) { setError(e.message); }
     finally {
       try { const chat = await api(`/conversations/${cid}`); setMessages(chat.messages); await refresh(); }
-      catch { setError('Connection lost. Reload to restore saved messages.'); }
+      catch { setError(currentError => currentError || 'Connection lost. Reload to restore saved messages.'); }
       api(`/status?model_id=${encodeURIComponent(modelId)}`).then(setStatus).catch(() => {});
       setBusy(false);
     }
@@ -244,24 +286,48 @@ function App() {
                 {m.status === 'streaming' && <span className="generating">Generating…</span>}
                 {m.created_at && <time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
               </div>
-              <MessageContent>{m.content || (m.status === 'streaming' ? 'Thinking…' : 'No response generated.')}</MessageContent>
-              {['error', 'interrupted'].includes(m.status) && <small className="incomplete">Incomplete response</small>}
+              {(m.content.trim() || m.status === 'streaming') && <MessageContent>{m.content || 'Thinking…'}</MessageContent>}
+              {m.attachments?.length > 0 && <MessageAttachments conversationId={current} files={m.attachments}/>}
+              {m.role === 'assistant' && m.status !== 'streaming' && (m.status !== 'complete' || !m.content.trim()) &&
+                <small className="incomplete">{m.content.trim() ? 'Incomplete response' : 'The model did not return an answer.'}</small>}
             </div>
           </article>)}
           <div ref={bottom}/>
         </div>}
       </div>
-      <div className="composer-area" hidden={comparing}>
+      <div className="composer-area" hidden={comparing}
+        onDragOver={e => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = canEdit ? 'copy' : 'none';
+          }
+        }}
+        onDrop={e => {
+          if (e.dataTransfer.files.length) { e.preventDefault(); addAttachments(e.dataTransfer.files); }
+        }}>
         {error && <div role="alert" className="error">{error}</div>}
-        {interrupted && !busy && <div className="retry-row"><span>The last response did not finish.</span><button onClick={() => send(true)} disabled={loading || !selectedModel?.installed}>Retry response</button></div>}
+        {interrupted && !busy && <div className="retry-row"><span>The last response did not finish.</span><button onClick={() => send(true)} disabled={!canRetry}>Retry response</button></div>}
+        {attachments.length > 0 && <DraftAttachments items={attachments} disabled={busy} onRemove={id => {
+          setAttachments(items => items.filter(item => item.id !== id)); setError('');
+        }}/>}
         <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+          <input type="file" ref={filePicker} accept={ACCEPT_ATTACHMENTS} multiple hidden
+            onChange={e => { addAttachments(e.target.files); e.target.value = ''; }}/>
+          <button type="button" className="icon-button attach-button" aria-label="Attach files" title="Attach files"
+            disabled={!canEdit} onClick={() => filePicker.current?.click()}><Icon name="paperclip"/></button>
           <textarea aria-label="Message" aria-describedby="composer-status" placeholder="Transmit a message to Abyss..." value={input}
-            disabled={!current || busy || loading || interrupted} onChange={e => setInput(e.target.value)}
+            disabled={!canEdit} onChange={e => setInput(e.target.value)}
+            onPaste={e => {
+              const images = pastedImages(e.clipboardData);
+              if (images.length) { e.preventDefault(); addAttachments(images); }
+            }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}/>
-          <button className="send" title="Send message" aria-label="Send message" disabled={!selectedModel?.installed || !current || !bytes || bytes > 2500 || busy || loading || interrupted}>{busy ? '…' : <Icon name="send" size={28}/>}</button>
+          <button className="send" title="Send message" aria-label="Send message" disabled={!canSend}>{busy ? '…' : <Icon name="send" size={28}/>}</button>
         </form>
         <div className="composer-status" id="composer-status">
-          <span>{status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…'}</span>
+          <span>{hasImage || retryHasImage
+            ? (vision?.installed ? 'Images use qwen3-vl:4b locally' : 'Images require qwen3-vl:4b in local Ollama. Install it, then refresh models.')
+            : (status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…')}</span>
           <span className={bytes > 2500 ? 'limit' : 'keyboard-hint'}>{bytes > 2500 ? `Message too long (${bytes}/2500 bytes)` : 'Shift + Enter for a new line'}</span>
         </div>
       </div>

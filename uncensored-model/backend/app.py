@@ -7,12 +7,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .runtime import OllamaRuntime, RuntimeErrorLocal, context_messages, model_from_catalog
+from .attachments import AttachmentError, attach_sources, parse_upload, remove_orphans, remove_upload, save_uploads, stored_path
+from .runtime import OllamaRuntime, RuntimeErrorLocal, VISION_MISSING, VISION_MODEL, context_messages, model_from_catalog
 from .storage import Store
 from .models import REGISTRY
 
@@ -49,12 +51,17 @@ class ModelChoice(BaseModel):
 
 def create_app(db_path=None, runtime=None):
     store = Store(Path(db_path) if db_path else ROOT / 'data' / 'chat.sqlite3')
+    uploads_dir = store.path.parent / 'uploads'
     model = runtime or OllamaRuntime()
     generation_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(app):
         store.initialize()
+        uploads_dir.mkdir(mode=0o700, exist_ok=True)
+        with store.connect() as db:
+            referenced = {row['storage_name'] for row in db.execute('SELECT storage_name FROM attachments')}
+        remove_orphans(uploads_dir, referenced)
         yield
 
     app = FastAPI(title='Abyss', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -68,7 +75,7 @@ def create_app(db_path=None, runtime=None):
         if request.headers.get('sec-fetch-site') == 'cross-site':
             return JSONResponse({'detail': 'Cross-site requests are disabled'}, status_code=403)
         response = await call_next(request)
-        response.headers['Content-Security-Policy'] = "default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; connect-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['Cache-Control'] = 'no-store'
@@ -106,7 +113,10 @@ def create_app(db_path=None, runtime=None):
 
     @app.get('/api/models')
     async def models():
-        return await model.catalog()
+        catalog = await model.catalog()
+        vision = next((m for m in catalog['models'] if m['ollamaModel'] == VISION_MODEL.ollamaModel), None)
+        return {**catalog, 'vision': {'model': VISION_MODEL.ollamaModel, 'installed': bool(vision and vision['installed'])},
+                'models': [m for m in catalog['models'] if m['ollamaModel'] != VISION_MODEL.ollamaModel]}
 
     @app.post('/api/compare')
     async def compare(body: Prompt):
@@ -114,7 +124,7 @@ def create_app(db_path=None, runtime=None):
         await generation_lock.acquire()
         try:
             catalog = await model.catalog()
-            installed = [m for m in catalog['models'] if m['installed']]
+            installed = [m for m in catalog['models'] if m['installed'] and m['ollamaModel'] != VISION_MODEL.ollamaModel]
             if not installed:
                 raise HTTPException(409, 'No registered models are installed or Ollama is unavailable.')
         except BaseException:
@@ -161,6 +171,22 @@ def create_app(db_path=None, runtime=None):
     async def get(cid: str):
         return {**require_conversation(cid), 'messages': store.messages(cid)}
 
+    @app.get('/api/conversations/{cid}/attachments/{fid}')
+    async def attachment(cid: str, fid: str, download: bool = False):
+        with store.connect() as db:
+            entry = db.execute('SELECT * FROM attachments WHERE conversation_id=? AND id=?', (cid, fid)).fetchone()
+        if not entry:
+            raise HTTPException(404, 'Attachment not found.')
+        try:
+            path = stored_path(uploads_dir, entry['storage_name'])
+        except AttachmentError as exc:
+            raise HTTPException(404, 'Attachment not found.') from exc
+        if not path.is_file():
+            raise HTTPException(404, 'Attachment file is missing.')
+        inline = entry['mime'].startswith('image/') and not download
+        return FileResponse(path, media_type=entry['mime'] if inline else 'application/octet-stream',
+                            filename=entry['filename'], content_disposition_type='inline' if inline else 'attachment')
+
     @app.patch('/api/conversations/{cid}')
     async def rename(cid: str, body: Title):
         require_conversation(cid)
@@ -173,45 +199,87 @@ def create_app(db_path=None, runtime=None):
         require_idle()
         require_conversation(cid)
         with store.connect() as db:
+            names = [row['storage_name'] for row in db.execute(
+                'SELECT storage_name FROM attachments WHERE conversation_id=?', (cid,))]
             db.execute('DELETE FROM conversations WHERE id=?', (cid,))
+        for name in names:
+            remove_upload(uploads_dir, name)
 
-    async def generate(cid, content=None, model_id=None):
-        selected = await choose(model_id)
+    async def generate(cid, content=None, model_id=None, uploads=()):
         require_idle()
+        await generation_lock.acquire()
+        new_files = []
+        try:
+            return await prepare_generation(cid, content, model_id, uploads, new_files)
+        except BaseException:
+            for file in new_files:
+                remove_upload(uploads_dir, file.storage_name)
+            generation_lock.release()
+            raise
+
+    async def prepare_generation(cid, content, model_id, uploads, new_files):
         conversation = require_conversation(cid)
         history = store.messages(cid)
         if content is None:
-            if not history or history[-1]['role'] != 'assistant' or history[-1]['status'] == 'complete':
+            if (not history or history[-1]['role'] != 'assistant'
+                    or (history[-1]['status'] == 'complete' and history[-1]['content'].strip())):
                 raise HTTPException(409, 'There is no interrupted response to retry.')
         elif history and history[-1]['status'] != 'complete':
             raise HTTPException(409, 'Retry the interrupted response before sending another message.')
-        await generation_lock.acquire()
+
+        files = []
+        if uploads:
+            new_files.extend(await run_in_threadpool(save_uploads, uploads_dir, uploads))
+            files = new_files
+        elif content is None:
+            previous = next(message for message in reversed(history) if message['role'] == 'user')
+            files = store.attachment_sources(cid, previous['id'])
+
+        if any(file.mime.startswith('image/') for file in files):
+            if not (await models())['vision']['installed']:
+                raise HTTPException(409, VISION_MISSING)
+            selected = VISION_MODEL
+        else:
+            selected = await choose(model_id)
+        context = context_messages(history[:-1] if content is None else [
+            *history, {'role': 'user', 'content': content},
+        ])
+        context_size = None
+        if files:
+            if not context[-1]['content']:
+                context[-1]['content'] = 'Describe or summarize the attached files.'
+            context_size = await run_in_threadpool(attach_sources, uploads_dir, context[-1], files, context)
+
         aid, stamp = str(uuid4()), now()
-        try:
-            with store.connect() as db:
-                if content is None:
-                    db.execute('DELETE FROM messages WHERE id=?', (history[-1]['id'],))
-                else:
-                    db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (str(uuid4()), cid, 'user', content, 'complete', stamp))
-                    if not history and conversation['title'] == 'New conversation':
-                        db.execute('UPDATE conversations SET title=? WHERE id=?', (content[:50], cid))
-                db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (aid, cid, 'assistant', '', 'streaming', stamp))
-                db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (stamp, cid))
-            context = context_messages(store.messages(cid))
-        except BaseException:
-            generation_lock.release()
-            raise
+        with store.connect() as db:
+            if content is None:
+                db.execute('DELETE FROM messages WHERE id=?', (history[-1]['id'],))
+            else:
+                mid = str(uuid4())
+                db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (mid, cid, 'user', content, 'complete', stamp))
+                store.save_attachments(db, cid, mid, new_files)
+                if not history and conversation['title'] == 'New conversation':
+                    title = content or new_files[0].filename
+                    db.execute('UPDATE conversations SET title=? WHERE id=?', (title[:50], cid))
+            db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (aid, cid, 'assistant', '', 'streaming', stamp))
+            db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (stamp, cid))
 
         async def events():
             answer, state = '', 'interrupted'
             def event(kind, **data):
                 return json.dumps({'type': kind, **data}, ensure_ascii=False) + '\n'
             try:
-                yield event('start', message_id=aid, model_id=selected.id)
-                async for token in model.stream(context, selected.id):
+                attachments = [{key: getattr(file, key) for key in ('id', 'filename', 'mime', 'size', 'status', 'warning')}
+                               for file in new_files]
+                yield event('start', message_id=aid, model_id=selected.id,
+                            **({'attachments': attachments} if attachments else {}))
+                options = {'attachment_context': context_size} if context_size else {}
+                async for token in model.stream(context, selected.id, **options):
                     answer += token
                     store.update_message(aid, answer, 'streaming')
                     yield event('delta', content=token)
+                if not answer.strip():
+                    raise RuntimeErrorLocal('The model finished without returning an answer. You can retry this response.')
                 state = 'complete'
                 store.update_message(aid, answer, state)
                 yield event('done')
@@ -234,9 +302,36 @@ def create_app(db_path=None, runtime=None):
     async def send(cid: str, body: Prompt):
         return await generate(cid, body.content, body.model_id)
 
+    @app.post('/api/conversations/{cid}/messages/attachments')
+    async def send_attachments(cid: str, request: Request):
+        require_idle()
+        require_conversation(cid)
+        if request.headers.get('content-type', '').split(';', 1)[0].lower() != 'multipart/form-data':
+            raise HTTPException(415, 'Use multipart/form-data for attachments.')
+        try:
+            form = await parse_upload(request)
+            try:
+                content, model_id = form.get('content', ''), form.get('model_id')
+                if not isinstance(content, str) or (model_id is not None and not isinstance(model_id, str)):
+                    raise HTTPException(422, 'Invalid message fields.')
+                content = content.strip()
+                if len(content.encode('utf-8')) > 2500:
+                    raise HTTPException(422, 'Message must contain at most 2500 UTF-8 bytes.')
+                uploads = form.getlist('files')
+                if not uploads:
+                    raise HTTPException(422, 'Choose at least one attachment.')
+                return await generate(cid, content, model_id, uploads)
+            finally:
+                await form.close()
+        except AttachmentError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+
     @app.post('/api/conversations/{cid}/retry')
     async def retry(cid: str, body: ModelChoice | None = None):
-        return await generate(cid, model_id=body.model_id if body else None)
+        try:
+            return await generate(cid, model_id=body.model_id if body else None)
+        except AttachmentError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
 
     if (ROOT / 'frontend' / 'dist').exists():
         app.mount('/', StaticFiles(directory=ROOT / 'frontend' / 'dist', html=True), name='frontend')

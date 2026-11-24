@@ -317,3 +317,33 @@ main::before {
   .section-label { margin-top: 16px; }
   aside { padding-bottom: 12px; }
 }
+
+.attach-button { flex-shrink: 0; }
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.composer-area > .attachment-list { max-height: min(24dvh, 155px); overflow-y: auto; }
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #11161b;
+  font-size: .85rem;
+}
+.attachment-preview { width: 38px; height: 38px; flex-shrink: 0; object-fit: contain; }
+.attachment-info { display: grid; min-width: 0; gap: 2px; }
+.attachment-info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-info small { color: var(--muted); }
+.attachment-info .limit { color: #ffc0a0; overflow-wrap: anywhere; }
+.attachment a { flex-shrink: 0; color: #ff9da1; }
+.attachment-remove { width: 30px; height: 32px; flex-shrink: 0; }

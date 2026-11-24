@@ -1,6 +1,6 @@
-# Abyss — Phase 1
+# Abyss
 
-A personal, text-only React + FastAPI chat application. SQLite stores conversations on this computer. Ollama runs one selected local model at a time. No accounts, telemetry, external fonts, CDNs, cloud APIs, attachments, search, or tools are used by the application.
+A personal React + FastAPI chat application with local attachments. SQLite stores conversations on this computer. Ollama runs one selected local model at a time. No accounts, telemetry, external fonts, CDNs, cloud APIs, search, or tools are used by the application.
 
 ## macOS setup
 
@@ -54,11 +54,20 @@ Open **http://127.0.0.1:8000**. Create a conversation and send a message. Enter 
 
 The launch command performs no installation or network downloads. The React build is served by FastAPI; no Node process is needed at runtime. After editing React files, run `npm.cmd run build` inside `frontend`, then restart the backend.
 
+## Local attachments and vision
+
+Open a conversation, then click the paperclip, drop files into the composer, or paste a screenshot into the message box. To ask about an attachment, include your question in the same message. Up to five files can be added, previewed, and removed before sending. Saved images can be opened or downloaded from chat history. Documents can be downloaded.
+
+- PNG, JPG, JPEG, and WEBP are limited to 10 MB each and 32 megapixels. Abyss preserves the original and sends a local model copy scaled to at most 1600 pixels on its longest side.
+- PDF, DOCX, and TXT are limited to 20 MB each, with at most 40,000 extracted characters per message. PDFs can be up to 30 pages. Export a smaller page range or excerpt if a limit is exceeded. PDFs with some unreadable pages show their page numbers. Scans with no extractable text require OCR outside Abyss. TXT supports UTF-8 and BOM-marked UTF-16 or UTF-32.
+- Text and document-only messages use the selected text model. Adding an image routes that turn to `qwen3-vl:4b`, with any extracted document text included. If the vision model is missing, Abyss displays an error or disables Send with an explanation. Install it manually with `ollama pull qwen3-vl:4b` if you want vision, then click **Refresh models**. Abyss never downloads models.
+- Attachment turns may request a larger context. Extremely large multi-byte excerpts can hit the model context budget before the character limit. Abyss reports that limit and asks for smaller excerpts. Later turns use normal recent-text context. Reattach a file if a follow-up needs its original contents.
+
 ## Selecting and comparing models
 
-Qwen3.5 9B Abliterated is a new candidate, not a declared winner. Its Q4_K_M build is `tutuchen2000/Qwen3.5-9B-abliterated-GGUF`. The previous two models remain available. Quality and acceptance require your own assessment. The app remains text-only. Use an up-to-date Ollama runtime with Qwen3.5 support.
+Qwen3.5 9B Abliterated is a new candidate, not a declared winner. Its Q4_K_M build is `tutuchen2000/Qwen3.5-9B-abliterated-GGUF`. The previous two models remain available. Quality and acceptance require your own assessment. Use an up-to-date Ollama runtime with Qwen3.5 support.
 
-The rename to Abyss preserves your browser model preference by migrating the old storage key once. Conversation storage remains at the same `data/chat.sqlite3` path with no schema changes.
+The rename to Abyss preserves your browser model preference by migrating the old storage key once. Conversation storage remains at the same `data/chat.sqlite3` path.
 
 Use **Active text model** in the chat header. Your choice is remembered in this browser and applies to the next message or retry, including in existing conversations. Switching does not load a model until a request is sent. New browsers prefer the configured default when it is installed, then another installed model if available. Edit `default_model` in `models.json` to change that preference.
 
@@ -75,9 +84,9 @@ The app uses a single shared generation lock for normal chat and comparisons. Be
 ## Privacy and storage
 
 - Backend binds to `127.0.0.1:8000`; runtime launcher binds Ollama to `127.0.0.1:11434` and sets `OLLAMA_NO_CLOUD=1`.
-- The model adapter has a fixed local URL and accepts only registry model IDs. It checks installed local weight metadata before sending prompts, rejects remote-model metadata, ignores HTTP proxy environment variables, follows no redirects, and never pulls models or falls back to a cloud service.
-- Frontend fetches only same-origin `/api` endpoints. Content Security Policy blocks external resources and connections. Cross-origin/cross-site requests and unexpected Host headers are rejected. Model text is rendered as escaped plain text, never executable HTML.
-- Application data is in `data/chat.sqlite3` (plus SQLite WAL/SHM files while running). This is ordinary unencrypted local storage. Stop the backend before copying the `data` folder for backup. Deletion removes records, not a forensic secure erase.
+- The model adapter has a fixed local URL and uses the configured or locally discovered model IDs. It checks installed local weight metadata before sending prompts, rejects remote-model metadata, ignores HTTP proxy environment variables, follows no redirects, and never pulls models or falls back to a cloud service.
+- Frontend fetches only same-origin `/api` endpoints. Content Security Policy blocks external resources and connections. Cross-origin/cross-site requests and unexpected Host headers are rejected. Model text uses Markdown with raw HTML disabled.
+- Conversation and extraction metadata are in `data/chat.sqlite3` (plus SQLite WAL/SHM files while running). Attachments live in `data/uploads/` and are served by conversation-scoped endpoints. Conversation deletion removes the corresponding records and uploaded files. This is ordinary unencrypted local storage. Stop the backend before copying the `data` folder for backup. Deletion removes records, not a forensic secure erase.
 - No prompt logging or analytics. Ollama is a separate installed program; its Windows app may check for updates. Use the provided standalone runtime launcher and disable cloud features; the application itself makes no external requests. An OS firewall can enforce machine-wide offline operation.
 - There is deliberately no authentication. Run only on your trusted personal machine and keep the localhost binding.
 
@@ -89,16 +98,16 @@ Messages are limited to 2500 UTF-8 bytes. A conservative 2800-byte recent-turn b
 
 Only one response generates at a time. Deltas are committed as they arrive. A closed connection or runtime error preserves the partial answer; restart marks unfinished streams interrupted. Retry replaces the incomplete assistant response without duplicating the user message. A backend process should run with **one worker**, as configured by `main.py`.
 
-## Code layout and Phase 2 boundary
+## Code layout
 
 - `frontend/src/main.jsx`: conversation UI and incremental NDJSON stream reader.
 - `frontend/src/Comparison.jsx`: transient comparison results and manual ratings.
 - `models.json` and `backend/models.py`: model registry, settings, and validation.
 - `backend/app.py`: validated API, response lifecycle, local request policy, static hosting.
-- `backend/storage.py`: SQLite schema and persistence; schema version starts at 1.
+- `backend/storage.py`: SQLite persistence and additive schema version 2 migration.
+- `backend/attachments.py`: local validation, extraction, and model input preparation.
+- `frontend/src/Attachments.jsx`: draft previews and attachment links.
 - `backend/runtime.py`: isolated model adapter and context selection.
-
-Phase 2 can add an attachments table keyed to message IDs, attachment UI, and a separate vision adapter alongside the text adapter. The existing conversation/message IDs and storage API can stay intact. No attachment handling or vision model loading is implemented now.
 
 The previous Transformers entry point was preserved as `legacy_transformers_demo.py`; it is not used by this application and its dependencies are no longer required.
 
