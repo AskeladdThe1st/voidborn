@@ -241,7 +241,6 @@ function App() {
               <div className="speaker">
                 <strong>{m.role === 'user' ? 'YOU' : 'ABYSS'}</strong>
                 <span className="speaker-role">/ {m.role === 'user' ? 'COMMANDER' : 'THE ENTITY'}</span>
-                <span className="speaker-slash" aria-hidden="true"/>
                 {m.status === 'streaming' && <span className="generating">Generating…</span>}
                 {m.created_at && <time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
               </div>
