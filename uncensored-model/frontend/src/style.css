@@ -117,7 +117,7 @@ main {
   min-width: 0;
   position: relative;
   isolation: isolate;
-  background: url('/art/starkiller-base.jpg') 60% center / cover no-repeat #080b10;
+  background: url('/art/art-space-moon-hk-2560x1440.jpg') center / cover no-repeat #080b10;
 }
 main::before {
   content: "";
@@ -292,7 +292,6 @@ main::before {
 }
 @media (max-width: 700px) {
   :root { --gutter: 17px; }
-  main { background-position: 63% center; }
   aside { display: none; position: fixed; inset: 0 auto 0 0; width: min(320px, 87vw); padding-inline: 18px; }
   aside.history-open { display: flex; }
   .history-backdrop { display: block; position: fixed; inset: 0; z-index: 1; border: 0; border-radius: 0; background: #000a; }
