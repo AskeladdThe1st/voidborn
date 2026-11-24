@@ -22,6 +22,7 @@ from starlette.formparsers import MultiPartException, MultiPartParser
 from starlette.requests import ClientDisconnect
 
 from .runtime import VISION_MODEL, VISION_OUTPUT_TOKENS
+from .models import MAX_PROMPT_BYTES
 
 MIB = 1024 * 1024
 MAX_FILES = 5
@@ -62,7 +63,7 @@ async def parse_upload(request):
     length = request.headers.get('content-length')
     if length and length.isdecimal() and int(length) > MAX_REQUEST:
         raise AttachmentError('Attachment request exceeds the total upload limit.', 413)
-    parser = MultiPartParser(request.headers, bounded_stream(), max_files=MAX_FILES, max_fields=2, max_part_size=4096)
+    parser = MultiPartParser(request.headers, bounded_stream(), max_files=MAX_FILES, max_fields=2, max_part_size=MAX_PROMPT_BYTES)
     try:
         return await parser.parse()
     except (MultiPartException, MultipartParseError, ClientDisconnect) as exc:
@@ -226,7 +227,8 @@ def attach_sources(root, turn, files, context):
     for size in (8192, 16384, 32768, 65536):
         if budget <= size:
             return size
-    raise AttachmentError('Attachments exceed the model context budget. No partial extraction was saved. Send smaller excerpts.', 413)
+    # Let Ollama check the actual token count when the byte estimate is larger.
+    return 65536
 
 
 def save_uploads(root, uploads):

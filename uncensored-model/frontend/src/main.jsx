@@ -5,6 +5,7 @@ import './models.css';
 import Comparison from './Comparison';
 import Icon from './Icon';
 import MessageContent from './MessageContent';
+import { MAX_PROMPT_BYTES } from './limits';
 import Dictation from './Dictation';
 import { ACCEPT_ATTACHMENTS, MAX_ATTACHMENTS, DraftAttachments, MessageAttachments, attachmentError, isImageAttachment, pastedImages } from './Attachments';
 
@@ -25,6 +26,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [contextNotice, setContextNotice] = useState('');
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState([]);
   const [modelId, setModelId] = useState('');
@@ -83,12 +85,12 @@ function App() {
   const latest = messages.at(-1);
   const interrupted = Boolean(latest && (latest.status !== 'complete' ||
     (latest.role === 'assistant' && !latest.content.trim())));
-  const bytes = new TextEncoder().encode(input.trim()).length;
+  const bytes = new TextEncoder().encode(input).length;
   const hasImage = attachments.some(item => isImageAttachment(item.file));
   const retryHasImage = interrupted && messages.findLast(m => m.role === 'user')?.attachments?.some(isImageAttachment);
   const canEdit = Boolean(current && !busy && !loading && !interrupted);
   const canSend = canEdit && !dictating && (hasImage ? vision?.installed : selectedModel?.installed) &&
-    (bytes > 0 || attachments.length > 0) && bytes <= 2500;
+    (input.trim() || attachments.length > 0) && bytes <= MAX_PROMPT_BYTES;
   const canRetry = !busy && !loading && (retryHasImage ? vision?.installed : selectedModel?.installed);
 
   useLayoutEffect(() => {
@@ -123,7 +125,7 @@ function App() {
   async function refresh() { setConversations(await api('/conversations')); }
   async function open(id) {
     const ticket = ++selection.current;
-    setLoading(true); setError(''); setEditing(false); setInput('');
+    setLoading(true); setError(''); setContextNotice(''); setEditing(false); setInput('');
     try {
       const data = await api(`/conversations/${id}`);
       if (ticket === selection.current) {
@@ -175,7 +177,7 @@ function App() {
     setLoading(true);
     try {
       await api(`/conversations/${current}`, { method: 'DELETE' });
-      setCurrent(null); setMessages([]); setInput(''); setAttachments([]); setEditing(false); await refresh();
+      setCurrent(null); setMessages([]); setInput(''); setContextNotice(''); setAttachments([]); setEditing(false); await refresh();
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
@@ -183,9 +185,9 @@ function App() {
     if (generation.current || (retry ? !canRetry : !canSend)) return;
     const controller = new AbortController();
     generation.current = controller;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setContextNotice('');
     const cid = current;
-    const content = input.trim();
+    const content = input;
     try {
       const multipart = !retry && attachments.length > 0;
       let body, headers;
@@ -210,12 +212,20 @@ function App() {
       function consume(line) {
         if (!line.trim()) return;
         const event = JSON.parse(line);
+        if (event.type === 'start' && event.history_omitted) {
+          setContextNotice('Some older turns were left out of the model context. They remain in your chat history.');
+        }
         if (event.type === 'start' && event.attachments) {
           setMessages(old => old.map(m => m.id === 'user-pending' ? { ...m, attachments: event.attachments } : m));
         }
         if (event.type === 'delta') setMessages(old => old.map((m, i) => i === old.length - 1 ? { ...m, content: m.content + event.content } : m));
         if (event.type === 'done') completed = true;
-        if (event.type === 'error') throw new Error(event.detail);
+        if (event.type === 'error') {
+          if (event.restore_draft) {
+            setInput(content); setAttachments(attachments); setContextNotice('');
+          }
+          throw new Error(event.detail);
+        }
       }
       try {
         while (true) {
@@ -374,10 +384,10 @@ function App() {
           </div>
         </form>
         <div className="composer-status" id="composer-status">
-          <span>{hasImage || retryHasImage
+          <span role={contextNotice ? 'status' : undefined}>{contextNotice || (hasImage || retryHasImage
             ? (vision?.installed ? 'Images use qwen3-vl:4b locally' : 'Images require qwen3-vl:4b in local Ollama. Install it, then refresh models.')
-            : (status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…')}</span>
-          <span className={bytes > 2500 ? 'limit' : 'keyboard-hint'}>{bytes > 2500 ? `Message too long (${bytes}/2500 bytes)` : 'Shift + Enter for a new line'}</span>
+            : (status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…'))}</span>
+          <span className={bytes > MAX_PROMPT_BYTES ? 'limit' : 'keyboard-hint'}>{bytes > MAX_PROMPT_BYTES ? 'Draft exceeds the 128 KiB upload limit. Split it into smaller messages.' : 'Shift + Enter for a new line'}</span>
         </div>
       </div>
     </main>

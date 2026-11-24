@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
-from backend.models import REGISTRY
+from backend.models import MAX_PROMPT_BYTES, REGISTRY
 
 import httpx
 from fastapi.testclient import TestClient
@@ -85,8 +85,9 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(store.messages(self.cid)[-1]['status'], 'interrupted')
 
     def test_validation_and_cross_site_protection(self):
-        for content in [' ', 'a' * 2501, '世' * 1000]:
-            self.assertEqual(self.client.post(self.url + '/messages', json={'content': content}).status_code, 422)
+        self.assertEqual(self.client.post(self.url + '/messages', json={'content': ' '}).status_code, 422)
+        for content in ['a' * (MAX_PROMPT_BYTES + 1), '世' * (MAX_PROMPT_BYTES // 3 + 1)]:
+            self.assertEqual(self.client.post(self.url + '/messages', json={'content': content}).status_code, 413)
         self.assertEqual(self.client.patch(self.url, json={'title': ' '}).status_code, 422)
         self.assertEqual(self.client.post('/api/conversations', headers={'Origin': 'https://example.com'}).status_code, 403)
         self.assertEqual(self.client.get('/api/conversations', headers={'Host': 'evil.example'}).status_code, 400)
@@ -97,7 +98,16 @@ class ChatTests(unittest.TestCase):
                     {'role': 'assistant', 'content': 'answer', 'status': 'complete'},
                     {'role': 'user', 'content': 'new', 'status': 'complete'},
                     {'role': 'assistant', 'content': '', 'status': 'streaming'}]
-        self.assertEqual(context_messages(messages), [{'role': 'user', 'content': 'new'}])
+        omitted = []
+        self.assertEqual(context_messages(messages, 2800, omitted=omitted), [{'role': 'user', 'content': 'new'}])
+        self.assertEqual(omitted, [1])
+
+    def test_long_multiline_prompt_is_stored_and_sent_intact(self):
+        code = '    first_line = True\n' + '    # multiline code\n' * 900 + '\n'
+        response = self.client.post(self.url + '/messages', json={'content': code})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.runtime.contexts[-1]['content'], code)
+        self.assertEqual(self.client.get(self.url).json()['messages'][0]['content'], code)
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):

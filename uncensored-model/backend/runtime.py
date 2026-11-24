@@ -71,6 +71,18 @@ class RuntimeErrorLocal(Exception):
     pass
 
 
+class ContextLimitError(RuntimeErrorLocal):
+    pass
+
+
+def context_error(detail, limit):
+    if 'context' in detail.lower() and any(word in detail.lower() for word in ('length', 'window', 'too long', 'exceed')):
+        return ContextLimitError(
+            f'This request exceeds the model’s available context window (up to {limit:,} tokens). '
+            'Shorten or split the prompt, or use a model with a larger configured context. No prompt was truncated.')
+    return None
+
+
 def ollama_error(value, fallback):
     if isinstance(value, str) and value.strip():
         return ' '.join(value.split())[:500]
@@ -179,13 +191,18 @@ class OllamaRuntime:
             options['num_predict'] = VISION_OUTPUT_TOKENS
         if attachment_context:
             instruction += '\n' + SOURCE_INSTRUCTION
-            options['num_ctx'] = attachment_context
+            options['num_ctx'] = max(options['num_ctx'], attachment_context)
         messages = [{'role': 'system', 'content': instruction}, *messages]
         answer_text = AnswerText()
         visible = thinking = False
         try:
             async with self.client() as client:
                 metadata = await self.prepare(client, selected)
+                if isinstance(metadata, dict):
+                    info = metadata.get('model_info', {})
+                    trained_context = info.get(f"{info.get('general.architecture')}.context_length")
+                    if isinstance(trained_context, int) and trained_context > 0:
+                        options['num_ctx'] = min(options['num_ctx'], trained_context)
                 think = selected.think if selected.think is not None else (False if selected.no_think else None)
                 if selected == VISION_MODEL and isinstance(metadata, dict):
                     directives = (metadata.get('modelfile') or '').splitlines()
@@ -197,13 +214,15 @@ class OllamaRuntime:
                         think = None
                 async with client.stream('POST', '/api/chat', json={
                     'model': selected.ollamaModel, 'messages': messages, 'stream': True,
+                    'truncate': False, 'shift': False,
                     **({'think': think} if think is not None else {}),
                     'keep_alive': 0,
                     'options': options,
                 }) as response:
                     if response.status_code != 200:
                         await response.aread()
-                        raise RuntimeErrorLocal(ollama_http_error(response))
+                        detail = ollama_http_error(response)
+                        raise context_error(detail, options['num_ctx']) or RuntimeErrorLocal(detail)
                     async for line in response.aiter_lines():
                         if not line:
                             continue
@@ -211,8 +230,8 @@ class OllamaRuntime:
                         if not isinstance(event, dict):
                             raise ValueError('Expected an Ollama response object.')
                         if event.get('error'):
-                            raise RuntimeErrorLocal('Ollama generation failed. ' + ollama_error(
-                                event['error'], 'No error details were supplied.'))
+                            detail = ollama_error(event['error'], 'No error details were supplied.')
+                            raise context_error(detail, options['num_ctx']) or RuntimeErrorLocal('Ollama generation failed. ' + detail)
                         message = event.get('message', {})
                         if not isinstance(message, dict):
                             raise ValueError('Expected an Ollama message object.')
@@ -247,8 +266,9 @@ class OllamaRuntime:
             raise RuntimeErrorLocal('Ollama returned an invalid response. You can retry this response.') from exc
 
 
-def context_messages(messages):
-    # Conservative UTF-8 byte budget; full history stays in SQLite.
+def context_messages(messages, budget, *, omitted=None):
+    # Budget older turns conservatively. Always include the latest user turn
+    # intact and let Ollama enforce its actual model-specific token limit.
     turns = []
     for message in messages:
         if message['role'] == 'user':
@@ -256,9 +276,11 @@ def context_messages(messages):
         elif turns and message['status'] == 'complete' and message['content'].strip():
             turns[-1].append({'role': 'assistant', 'content': message['content']})
     selected, size = [], 0
-    for turn in reversed(turns):
+    for index, turn in enumerate(reversed(turns)):
         cost = sum(len(m['content'].encode('utf-8')) + 32 for m in turn)
-        if size + cost > 2800:
+        if index and size + cost > budget:
+            if omitted is not None:
+                omitted.append(len(turns) - index)
             break
         selected = turn + selected
         size += cost

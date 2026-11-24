@@ -3,12 +3,14 @@ import json
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+MAX_PROMPT_BYTES = 128 * 1024
+
 
 class GenerationOptions(BaseModel):
     model_config = ConfigDict(extra='forbid')
     temperature: float = Field(default=0.4, ge=0, le=2)
     top_p: float = Field(default=0.9, gt=0, le=1)
-    num_ctx: int = Field(default=4096, ge=4096, le=8192)
+    num_ctx: int = Field(default=4096, ge=4096, le=65536)
     num_predict: int = Field(default=1024, ge=1, le=1024)
 
 

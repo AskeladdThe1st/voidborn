@@ -8,7 +8,7 @@
       "options": {
         "temperature": 0.4,
         "top_p": 0.9,
-        "num_ctx": 4096,
+        "num_ctx": 16384,
         "num_predict": 1024
       },
       "displayName": "Qwen3 8B Abliterated · Q4_K_M",
@@ -20,7 +20,7 @@
       "options": {
         "temperature": 0.4,
         "top_p": 0.9,
-        "num_ctx": 4096,
+        "num_ctx": 16384,
         "num_predict": 1024
       },
       "displayName": "Gemma 3 4B IT Abliterated v2 · Q4_K_M",
@@ -33,7 +33,7 @@
       "options": {
         "temperature": 0.4,
         "top_p": 0.9,
-        "num_ctx": 4096,
+        "num_ctx": 32768,
         "num_predict": 1024
       },
       "displayName": "Qwen3.5 9B Abliterated - Q4_K_M",
@@ -47,7 +47,7 @@
       "options": {
         "temperature": 0.4,
         "top_p": 0.9,
-        "num_ctx": 4096,
+        "num_ctx": 16384,
         "num_predict": 1024
       }
     }

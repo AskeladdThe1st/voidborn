@@ -15,9 +15,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .attachments import AttachmentError, attach_sources, parse_upload, remove_orphans, remove_upload, save_uploads, stored_path
 from .dictation import dictation_router
-from .runtime import OllamaRuntime, RuntimeErrorLocal, VISION_MISSING, VISION_MODEL, context_messages, model_from_catalog
+from .runtime import ContextLimitError, OllamaRuntime, RuntimeErrorLocal, VISION_MISSING, VISION_MODEL, context_messages, model_from_catalog
 from .storage import Store
-from .models import REGISTRY
+from .models import MAX_PROMPT_BYTES, REGISTRY
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,16 +34,21 @@ class Title(BaseModel):
 
 
 class Prompt(BaseModel):
-    content: str = Field(min_length=1, max_length=2500)
+    content: str = Field(min_length=1)
     model_id: str | None = None
 
     @field_validator('content')
     @classmethod
     def clean(cls, value):
-        value = value.strip()
-        if not value or len(value.encode('utf-8')) > 2500:
-            raise ValueError('Message must contain 1–2500 UTF-8 bytes')
+        if not value.strip():
+            raise ValueError('Message cannot be blank.')
+        check_prompt_size(value)
         return value
+
+
+def check_prompt_size(content):
+    if len(content.encode('utf-8')) > MAX_PROMPT_BYTES:
+        raise HTTPException(413, 'The message exceeds the 128 KiB upload limit. Split it into smaller messages.')
 
 
 class ModelChoice(BaseModel):
@@ -243,16 +248,18 @@ def create_app(db_path=None, runtime=None):
             selected = VISION_MODEL
         else:
             selected = await choose(model_id)
+        omitted = []
         context = context_messages(history[:-1] if content is None else [
             *history, {'role': 'user', 'content': content},
-        ])
+        ], selected.options.num_ctx - selected.options.num_predict - 1024, omitted=omitted)
         context_size = None
         if files:
-            if not context[-1]['content']:
+            if not context[-1]['content'].strip():
                 context[-1]['content'] = 'Describe or summarize the attached files.'
             context_size = await run_in_threadpool(attach_sources, uploads_dir, context[-1], files, context)
 
         aid, stamp = str(uuid4()), now()
+        mid = None
         with store.connect() as db:
             if content is None:
                 db.execute('DELETE FROM messages WHERE id=?', (history[-1]['id'],))
@@ -261,7 +268,7 @@ def create_app(db_path=None, runtime=None):
                 db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (mid, cid, 'user', content, 'complete', stamp))
                 store.save_attachments(db, cid, mid, new_files)
                 if not history and conversation['title'] == 'New conversation':
-                    title = content or new_files[0].filename
+                    title = content.strip() or new_files[0].filename
                     db.execute('UPDATE conversations SET title=? WHERE id=?', (title[:50], cid))
             db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?)', (aid, cid, 'assistant', '', 'streaming', stamp))
             db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (stamp, cid))
@@ -274,6 +281,7 @@ def create_app(db_path=None, runtime=None):
                 attachments = [{key: getattr(file, key) for key in ('id', 'filename', 'mime', 'size', 'status', 'warning')}
                                for file in new_files]
                 yield event('start', message_id=aid, model_id=selected.id,
+                            **({'history_omitted': omitted[0]} if omitted else {}),
                             **({'attachments': attachments} if attachments else {}))
                 options = {'attachment_context': context_size} if context_size else {}
                 async for token in model.stream(context, selected.id, **options):
@@ -285,6 +293,19 @@ def create_app(db_path=None, runtime=None):
                 state = 'complete'
                 store.update_message(aid, answer, state)
                 yield event('done')
+            except ContextLimitError as exc:
+                state = 'error'
+                if mid and not answer.strip():
+                    # A rejected prompt belongs in the editable draft, not in history.
+                    with store.connect() as db:
+                        db.execute('DELETE FROM messages WHERE id IN (?, ?)', (mid, aid))
+                        db.execute('UPDATE conversations SET title=?, updated_at=? WHERE id=? AND updated_at=?',
+                                   (conversation['title'], conversation['updated_at'], cid, stamp))
+                    for file in new_files:
+                        remove_upload(uploads_dir, file.storage_name)
+                    yield event('error', detail=str(exc), restore_draft=True)
+                else:
+                    yield event('error', detail=str(exc))
             except RuntimeErrorLocal as exc:
                 state = 'error'
                 store.update_message(aid, answer, state)
@@ -316,9 +337,7 @@ def create_app(db_path=None, runtime=None):
                 content, model_id = form.get('content', ''), form.get('model_id')
                 if not isinstance(content, str) or (model_id is not None and not isinstance(model_id, str)):
                     raise HTTPException(422, 'Invalid message fields.')
-                content = content.strip()
-                if len(content.encode('utf-8')) > 2500:
-                    raise HTTPException(422, 'Message must contain at most 2500 UTF-8 bytes.')
+                check_prompt_size(content)
                 uploads = form.getlist('files')
                 if not uploads:
                     raise HTTPException(422, 'Choose at least one attachment.')

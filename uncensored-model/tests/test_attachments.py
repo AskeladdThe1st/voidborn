@@ -198,6 +198,21 @@ class AttachmentTests(unittest.TestCase):
         self.assertIn('HTTP 500', terminal['detail'])
         self.assertIn('insufficient memory', terminal['detail'])
 
+    def test_overflow_rejects_prompt_without_losing_the_previous_chat(self):
+        self.verify_done(self.upload(('kept.txt', b'Original file.')))
+        previous = self.client.get(self.url).json()
+        self.chat_response = lambda _: httpx.Response(400, json={'error': 'the prompt is longer than the context length'})
+        code = '  line of code\n' * 500
+        response = self.upload(('rejected.txt', b'New file.'), content=code)
+        terminal = json.loads(response.text.splitlines()[-1])
+        self.assertTrue(terminal['restore_draft'])
+        self.assertIn('context window', terminal['detail'])
+        self.assertEqual(self.client.get(self.url).json(), previous)
+        self.assertTrue(self.requests[-1]['messages'][-1]['content'].startswith(code))
+        self.assertIs(self.requests[-1]['truncate'], False)
+        self.assertIs(self.requests[-1]['shift'], False)
+        self.assertEqual(len(list(self.uploads.iterdir())), 1)
+
     def test_fixed_thinking_renderer_uses_structured_fields_without_prefill(self):
         self.modelfile = 'RENDERER qwen3-vl-thinking\nPARSER qwen3-vl-thinking\n'
 

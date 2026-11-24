@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import MessageContent from './MessageContent';
+import { MAX_PROMPT_BYTES } from './limits';
 
 const categories = [
   ['acceptance', 'Acceptance', '1 = unnecessary refusal; 10 = directly addresses the request'],
@@ -14,7 +15,7 @@ export default function Comparison({ models, busy, setBusy }) {
   const [results, setResults] = useState([]);
   const [error, setError] = useState('');
   const [testedPrompt, setTestedPrompt] = useState('');
-  const bytes = new TextEncoder().encode(prompt.trim()).length;
+  const bytes = new TextEncoder().encode(prompt).length;
   const installed = models.filter(m => m.installed);
 
   function update(id, fields) {
@@ -23,13 +24,13 @@ export default function Comparison({ models, busy, setBusy }) {
 
   async function run(event) {
     event.preventDefault();
-    if (busy || !bytes || bytes > 2500 || !installed.length) return;
-    setBusy(true); setError(''); setTestedPrompt(prompt.trim());
+    if (busy || !prompt.trim() || bytes > MAX_PROMPT_BYTES || !installed.length) return;
+    setBusy(true); setError(''); setTestedPrompt(prompt);
     setResults(installed.map(m => ({ id: m.id, label: m.displayName, content: '', state: 'Waiting', ratings: {} })));
     try {
       const response = await fetch('/api/compare', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: prompt.trim() }),
+        body: JSON.stringify({ content: prompt }),
       });
       if (!response.ok) {
         const data = await response.json();
@@ -67,8 +68,8 @@ export default function Comparison({ models, busy, setBusy }) {
     <div className="model-installations">{models.map(m => <div key={m.id}><strong>{m.displayName}</strong> — {m.installed ? 'Installed' : 'Not installed'}<small>Temperature {m.options.temperature} · top_p {m.options.top_p}</small></div>)}</div>
     <form onSubmit={run}>
       <textarea aria-label="Comparison prompt" placeholder="Enter a factual question or a prompt with a known answer…" value={prompt} disabled={busy} onChange={e => setPrompt(e.target.value)}/>
-      <button className="primary" disabled={busy || !installed.length || !bytes || bytes > 2500}>{busy ? 'Comparing…' : `Compare ${installed.length} installed model${installed.length === 1 ? '' : 's'}`}</button>
-      {bytes > 2500 && <p className="limit">Limit: 2500 UTF-8 bytes.</p>}
+      <button className="primary" disabled={busy || !installed.length || !prompt.trim() || bytes > MAX_PROMPT_BYTES}>{busy ? 'Comparing…' : `Compare ${installed.length} installed model${installed.length === 1 ? '' : 's'}`}</button>
+      {bytes > MAX_PROMPT_BYTES && <p className="limit">Limit: 128 KiB.</p>}
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     {results.length > 0 && <><p className="tested-prompt"><strong>Test prompt:</strong> {testedPrompt}</p><p>Score each category from 1 (poor) to 10 (excellent). Higher factual reliability means fewer hallucinations. Leave a score unrated if you cannot judge it. Ratings are manual; Abyss does not rank models or select a winner.</p></>}
