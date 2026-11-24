@@ -125,7 +125,7 @@ main {
   min-width: 0;
   position: relative;
   isolation: isolate;
-  background: url('/art/station.jpg') calc(50% + 22vw) center / cover no-repeat #080b10;
+  background: url('/art/starkiller-base.jpg') 60% center / cover no-repeat #080b10;
 }
 main::before {
   content: "";
@@ -199,6 +199,7 @@ main::before {
 .channel h1 { margin: 0; color: #c5c9d1; font-weight: 500; font-size: 1.05rem; white-space: nowrap; text-transform: uppercase; }
 .channel h1 span { margin-right: 4px; color: #98a5b4; }
 .channel-title { max-width: 42%; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+.channel h1, .channel-title { padding: 3px 6px; background: #080c10ee; }
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .welcome { padding: clamp(20px, 9dvh, 90px) var(--gutter); }
 .welcome img {
@@ -314,7 +315,7 @@ main::before {
 }
 @media (max-width: 700px) {
   :root { --gutter: 17px; }
-  main { background-position: 55% center; }
+  main { background-position: 63% center; }
   aside { display: none; position: fixed; inset: 0 auto 0 0; width: min(320px, 87vw); padding-inline: 18px; }
   aside.history-open { display: flex; }
   .history-backdrop { display: block; position: fixed; inset: 0; z-index: 1; border: 0; border-radius: 0; background: #000a; }

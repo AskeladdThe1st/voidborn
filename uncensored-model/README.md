@@ -132,5 +132,5 @@ The model list refreshes at startup, via **Refresh Models**, when returning to t
 
 ## Interface artwork
 
-- Station background: [Starkiller Base](https://www.starwars.com/databank/starkiller-base) from the official Star Wars Databank.
+- Station background: [Starkiller Base firing](https://www.inverse.com/entertainment/star-wars-force-awakens-leak-coruscant), via Inverse, 3840 × 2160.
 - Chat portraits: Darth Vader for the Commander and a stormtrooper for the Entity, using the supplied pixel-art images.
