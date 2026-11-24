@@ -1,22 +1,21 @@
-[hidden] { display: none !important; }
-.brand-mascot { display: block; width: 30px; height: 30px; flex-shrink: 0; }
-@media (max-width: 500px) { .brand-mascot { width: 24px; height: 24px; } }
-.model-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-select { background: #242c25; color: #e5e8e4; border: 1px solid #56654f; border-radius: 6px; padding: 8px; font: inherit; max-width: 100%; }
-.model-controls select { font-size: 11px; max-width: min(360px, 45vw); }
-.model-controls button { font-size: 11px; }
-.comparison { padding: 24px 32px; max-width: 1200px; margin: auto; }
-.comparison h2 { font-size: 22px; font-weight: 500; }
-.comparison p { color: #a9b6aa; line-height: 1.7; }
-.comparison textarea { border: 1px solid #56654f; border-radius: 10px; padding: 12px; min-height: 100px; margin: 16px 0; }
-.model-installations { display: grid; gap: 12px; font-size: 12px; color: #b2c4a8; }
-.model-installations small { display: block; color: #97a28f; margin-top: 5px; }
+.comparison {
+  max-width: 1200px;
+  margin: 0 var(--gutter) 24px;
+  padding: clamp(14px, 2vw, 28px);
+  background: #0a1016de;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.comparison h2 { font-size: 1.4rem; font-weight: 600; margin-top: 0; }
+.comparison p { color: var(--muted); line-height: 1.65; }
+.comparison textarea { width: 100%; border-radius: 6px; padding: 12px; min-height: 100px; margin: 16px 0 9px; resize: vertical; display: block; }
+.model-installations { display: grid; gap: 12px; font-size: .9rem; }
+.model-installations small { display: block; color: var(--muted); margin-top: 4px; }
 .comparison-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr)); gap: 16px; }
-.comparison-result { border: 1px solid #424b41; border-radius: 12px; padding: 18px; min-width: 0; }
-.comparison-result h3 { font-size: 14px; margin-top: 0; }
-.result-timing { color: #a1b796; font-size: 12px; margin-bottom: 20px; }
-.comparison-result label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; margin-top: 18px; }
-.comparison-result select { font-size: 12px; }
-.rating small { display: block; margin-top: 6px; color: #a9b6aa; line-height: 1.5; }
+.comparison-result { border: 1px solid var(--line); border-radius: 8px; padding: 15px; min-width: 0; background: #11181f; }
+.comparison-result h3 { font-size: 1rem; margin-top: 0; overflow-wrap: anywhere; }
+.result-timing { color: #ffb0b6; font-size: .85rem; margin-bottom: 16px; }
+.comparison-result label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .85rem; margin-top: 16px; }
+.comparison-result select { font-size: .85rem; padding: 4px 6px; border-radius: 4px; }
+.rating small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.5; }
 .tested-prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 750px) { .comparison { padding: 18px; } .model-controls select { max-width: 100%; } }

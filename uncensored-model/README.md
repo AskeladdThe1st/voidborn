@@ -129,3 +129,8 @@ The installed Qwen3.5 entry uses the exact Windows Ollama name `hf.co/tutuchen20
 
 The model list refreshes at startup, via **Refresh Models**, when returning to the browser tab, and every 15 seconds while visible. Each check reads Ollama again with browser caching disabled. After installing a model outside Abyss, return to the app or press Refresh Models; a backend restart is only required for registry/code changes, not subsequent installs.
 
+
+## Interface artwork
+
+- Station background: [Starkiller Base](https://www.starwars.com/databank/starkiller-base) from the official Star Wars Databank.
+- Chat portraits: Darth Vader for the Commander and a stormtrooper for the Entity, using the supplied pixel-art images.

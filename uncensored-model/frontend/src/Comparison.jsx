@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import MessageContent from './MessageContent';
 
 const categories = [
   ['acceptance', 'Acceptance', '1 = unnecessary refusal; 10 = directly addresses the request'],
@@ -73,7 +74,7 @@ export default function Comparison({ models, busy, setBusy }) {
     {results.length > 0 && <><p className="tested-prompt"><strong>Test prompt:</strong> {testedPrompt}</p><p>Score each category from 1 (poor) to 10 (excellent). Higher factual reliability means fewer hallucinations. Leave a score unrated if you cannot judge it. Ratings are manual; Abyss does not rank models or select a winner.</p></>}
     <div className="comparison-results">{results.map(r => <article className="comparison-result" key={r.id}>
       <h3>{r.label}</h3><div className="result-timing">{r.state}{r.seconds != null && ` · Total ${r.seconds.toFixed(2)}s`}{r.first != null && ` · First token ${r.first.toFixed(2)}s`}</div>
-      <div className="message-text">{r.content}</div>{r.error && <p className="error">{r.error}</p>}
+      <MessageContent>{r.content}</MessageContent>{r.error && <p className="error">{r.error}</p>}
       {categories.map(([key, label, guide]) => <div className="rating" key={key}>
         <label>{label}<select aria-label={`${r.label}: ${label}`} value={r.ratings[key] || ''} disabled={busy || r.state !== 'Complete'} onChange={e => update(r.id, { ratings: { ...r.ratings, [key]: e.target.value } })}>
           <option value="">Unrated</option>{Array.from({ length: 10 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}

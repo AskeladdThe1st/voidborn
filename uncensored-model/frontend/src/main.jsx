@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 import './models.css';
 import Comparison from './Comparison';
+import Icon from './Icon';
+import MessageContent from './MessageContent';
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { cache: 'no-store', ...options, headers: { 'Content-Type': 'application/json' } });
@@ -25,14 +27,27 @@ function App() {
   const [models, setModels] = useState([]);
   const [modelId, setModelId] = useState('');
   const [comparing, setComparing] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [runtimeAvailable, setRuntimeAvailable] = useState(null);
+  const historyToggle = useRef(null);
+  const historyClose = useRef(null);
   const selectedModel = models.find(m => m.id === modelId);
   const modelRefresh = useRef(0);
+
+  function closeHistory() {
+    setHistoryOpen(false);
+    historyToggle.current?.focus();
+  }
+  useEffect(() => {
+    if (historyOpen) historyClose.current?.focus();
+  }, [historyOpen]);
 
   async function refreshModels() {
     const request = ++modelRefresh.current;
     const catalog = await api('/models');
     if (request !== modelRefresh.current) return;
     setModels(catalog.models);
+    setRuntimeAvailable(catalog.available);
     setModelId(old => {
       let saved = '';
       try { saved = localStorage.getItem('abyss-model') || localStorage.getItem('local-chat-model') || ''; } catch {}
@@ -53,6 +68,8 @@ function App() {
   const bottom = useRef(null);
   const selection = useRef(0);
   const active = conversations.find(c => c.id === current);
+  const runtimeLabel = runtimeAvailable === null ? 'Checking connection…' : runtimeAvailable
+    ? (models.some(m => m.installed) ? 'Connected' : 'Connected · no models installed') : 'Offline';
   const interrupted = messages.length > 0 && messages.at(-1).status !== 'complete';
   const bytes = new TextEncoder().encode(input.trim()).length;
 
@@ -62,7 +79,10 @@ function App() {
     setLoading(true); setError(''); setEditing(false); setInput('');
     try {
       const data = await api(`/conversations/${id}`);
-      if (ticket === selection.current) { setCurrent(id); setMessages(data.messages); }
+      if (ticket === selection.current) {
+        setCurrent(id); setMessages(data.messages); setComparing(false);
+        if (historyOpen) closeHistory();
+      }
     } catch (e) { setError(e.message); }
     finally { if (ticket === selection.current) setLoading(false); }
   }
@@ -153,25 +173,98 @@ function App() {
   }
 
   return <div className="app">
-    <aside>
-      <div className="brand"><img className="brand-mascot" src="/abyss-icon.svg" width="30" height="30" alt=""/> Abyss <span className="private">PRIVATE</span></div>
-      <button className="new-chat" onClick={newChat} disabled={busy || loading}><span>＋</span> New conversation</button>
-      <div className="section-label">CONVERSATIONS <span>{conversations.length}</span></div>
-      <nav aria-label="Conversations">{conversations.map(c => <button key={c.id} title={c.title} className={`conversation ${current === c.id ? 'selected' : ''}`} disabled={busy || loading} onClick={() => open(c.id)}><span className="chat-icon">▤</span><span>{c.title}</span></button>)}{!conversations.length && <p className="sidebar-empty">Your conversations will appear here.</p>}</nav>
-      <div className="sidebar-footer"><span className="local-dot"/> Stored on this device <small>No accounts. No cloud.</small></div>
+    {historyOpen && <button type="button" className="history-backdrop" tabIndex={-1} aria-label="Dismiss conversation history" onClick={closeHistory}/>}
+    <aside id="history" className={historyOpen ? 'history-open' : ''} onKeyDown={e => { if (historyOpen && e.key === 'Escape') closeHistory(); }}>
+      <div className="brand">
+        <img className="insignia" src="/art/insignia.svg" width="90" height="112" alt=""/>
+        <div><img className="wordmark" src="/art/wordmark.svg" width="158" height="28" alt="Abyss"/><div className="brand-caption">LOCAL INTELLIGENCE SYSTEM</div></div>
+        <button ref={historyClose} className="icon-button history-close" aria-label="Close conversation history" onClick={closeHistory}><Icon name="close"/></button>
+      </div>
+      <button className="new-chat" onClick={newChat} disabled={busy || loading}><Icon name="plus"/> New Chat</button>
+      <div className="section-label">Recent conversations</div>
+      <nav aria-label="Conversations">
+        {conversations.map(c => <button key={c.id} title={c.title} aria-current={current === c.id ? 'true' : undefined}
+          className={`conversation ${current === c.id ? 'selected' : ''}`} disabled={busy || loading} onClick={() => open(c.id)}>
+          <Icon name="folder" size={19}/><span>{c.title}</span>
+        </button>)}
+        {!conversations.length && <p className="sidebar-empty">No conversations yet.</p>}
+      </nav>
+      <div className="sidebar-footer">
+        <Icon name="cube" size={28}/>
+        <div><strong>Ollama (Local)</strong><small><span className={`local-dot ${runtimeAvailable ? '' : 'offline'}`}/>{runtimeLabel}</small></div>
+      </div>
     </aside>
+
     <main>
-      <header><div><strong>{active?.title || 'Abyss'}</strong><div className="model-controls"><select aria-label="Active text model" value={modelId} disabled={busy || loading} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.installed ? '' : ' (not installed)'}</option>)}</select><button disabled={busy} onClick={() => setComparing(!comparing)}>{comparing ? 'Back to chat' : 'Compare models'}</button><button disabled={busy} onClick={() => refreshModels().catch(e => setError(e.message))}>Refresh Models</button></div></div>{current && <div className="actions"><button disabled={busy || loading} onClick={() => { setTitle(active.title); setEditing(!editing); }}>Rename</button><button disabled={busy || loading} onClick={remove}>Delete</button></div>}</header>
-      {!comparing && editing && <form className="rename" onSubmit={rename}><input aria-label="Conversation title" autoFocus maxLength={100} value={title} onChange={e => setTitle(e.target.value)}/><button disabled={!title.trim()}>Save</button><button type="button" onClick={() => setEditing(false)}>Cancel</button></form>}
-      <div className="chat-scroll" hidden={!comparing}><Comparison models={models} busy={busy} setBusy={setBusy}/></div>
+      <header className="topbar">
+        <button ref={historyToggle} className="icon-button history-toggle" aria-label="Open conversation history" aria-expanded={historyOpen} aria-controls="history" onClick={() => historyOpen ? closeHistory() : setHistoryOpen(true)}><Icon name="menu"/></button>
+        <span className="mobile-brand">ABYSS</span>
+        <fieldset className="model-picker">
+          <legend>Model</legend>
+          <Icon name="cube"/>
+          <select aria-label="Active text model" value={modelId} disabled={busy || loading || !models.length} onChange={e => setModelId(e.target.value)}>
+            {!models.length && <option value="">Loading models…</option>}
+            {models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.installed ? '' : ' (not installed)'}</option>)}
+          </select>
+        </fieldset>
+        <div className="actions">
+          <button className="icon-button" title={comparing ? 'Back to chat' : 'Compare models'} aria-label={comparing ? 'Back to chat' : 'Compare models'} aria-pressed={comparing} disabled={busy} onClick={() => setComparing(!comparing)}><Icon name="compare"/></button>
+          <button className="icon-button" title="Refresh models" aria-label="Refresh models" disabled={busy} onClick={() => refreshModels().catch(e => setError(e.message))}><Icon name="refresh"/></button>
+          {current && !comparing && <>
+            <button className="icon-button" title="Rename conversation" aria-label="Rename conversation" disabled={busy || loading} onClick={() => { setTitle(active.title); setEditing(!editing); }}><Icon name="edit" size={20}/></button>
+            <button className="icon-button" title="Delete conversation" aria-label="Delete conversation" disabled={busy || loading} onClick={remove}><Icon name="trash" size={20}/></button>
+          </>}
+        </div>
+      </header>
+
+      <div className="channel">
+        <h1><span aria-hidden="true">//</span> {comparing ? 'Model comparison' : 'Conversation'}</h1>
+        {!comparing && active && <span className="channel-title" title={active.title}>{active.title}</span>}
+      </div>
+      {!comparing && editing && <form className="rename" onSubmit={rename}>
+        <input aria-label="Conversation title" autoFocus maxLength={100} value={title} onChange={e => setTitle(e.target.value)}/>
+        <button disabled={!title.trim()}>Save</button><button type="button" onClick={() => setEditing(false)}>Cancel</button>
+      </form>}
+      <div className="chat-scroll" hidden={!comparing}>
+        {error && <div role="alert" className="error comparison-error">{error}</div>}
+        <Comparison models={models} busy={busy} setBusy={setBusy}/>
+      </div>
       <div className="chat-scroll" hidden={comparing}>
-        {!messages.length ? <section className="welcome"><div className="welcome-icon">◈</div><div className="eyebrow">A LITTLE SPACE TO THINK</div><h1>What’s on your mind?</h1><p>A conversation that stays on your computer.<br/>Ask a question, work through an idea, or start writing.</p>{!current && <button className="primary" disabled={loading} onClick={newChat}>Start a conversation <span>＋</span></button>}<div className="privacy-note"><span className="local-dot"/> Local model <span>·</span> Local history <span>·</span> Just you</div></section> : <div className="messages">{messages.map(m => <article key={m.id} className={`message ${m.role}`}><div className={`avatar ${m.role}`}>{m.role === 'user' ? 'Y' : '◈'}</div><div className="message-body"><div className="speaker">{m.role === 'user' ? 'You' : 'Assistant'}{m.status === 'streaming' && <span className="generating">Generating…</span>}</div><div className="message-text">{m.content || (m.status === 'streaming' ? 'Thinking…' : 'No response generated.')}</div>{['error', 'interrupted'].includes(m.status) && <small className="incomplete">Incomplete response</small>}</div></article>)}<div ref={bottom}/></div>}
+        {!messages.length ? <section className="welcome">
+          <img className="pixel-portrait" src="/art/stormtrooper-reference.png" alt="" width="72" height="72"/>
+          <h2>{loading ? 'Loading conversation…' : 'Abyss is listening'}</h2>
+          {!current && !loading && <button className="primary" onClick={newChat}>Start a conversation <Icon name="arrow" size={16}/></button>}
+        </section> : <div className="messages">
+          {messages.map(m => <article key={m.id} className={`message ${m.role}`}>
+            <div className="avatar"><img className="pixel-portrait" src={m.role === 'user' ? '/art/vader-reference.png' : '/art/stormtrooper-reference.png'} width="48" height="48" alt=""/></div>
+            <div className="message-body">
+              <div className="speaker">
+                <strong>{m.role === 'user' ? 'YOU' : 'ABYSS'}</strong>
+                <span className="speaker-role">/ {m.role === 'user' ? 'COMMANDER' : 'THE ENTITY'}</span>
+                <span className="speaker-slash" aria-hidden="true"/>
+                {m.status === 'streaming' && <span className="generating">Generating…</span>}
+                {m.created_at && <time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+              </div>
+              <MessageContent>{m.content || (m.status === 'streaming' ? 'Thinking…' : 'No response generated.')}</MessageContent>
+              {['error', 'interrupted'].includes(m.status) && <small className="incomplete">Incomplete response</small>}
+            </div>
+          </article>)}
+          <div ref={bottom}/>
+        </div>}
       </div>
       <div className="composer-area" hidden={comparing}>
         {error && <div role="alert" className="error">{error}</div>}
         {interrupted && !busy && <div className="retry-row"><span>The last response did not finish.</span><button onClick={() => send(true)} disabled={loading || !selectedModel?.installed}>Retry response</button></div>}
-        <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}><textarea aria-label="Message" placeholder={current ? `Message ${selectedModel?.displayName || 'model'}...` : 'Create a conversation to begin'} value={input} disabled={!current || busy || loading || interrupted} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}/><div className="composer-bottom"><span>Text only <span className="separator">/</span> {bytes > 2500 ? <span className="limit">Message too long ({bytes}/2500 bytes)</span> : 'Shift + Enter for a new line'}</span><button className="send" aria-label="Send message" disabled={!selectedModel?.installed || !current || !bytes || bytes > 2500 || busy || loading || interrupted}>{busy ? '…' : '↑'}</button></div></form>
-        <div className="bottom-note"><span className={`local-dot ${status?.ready ? '' : 'offline'}`}/>{status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…'}</div>
+        <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+          <textarea aria-label="Message" aria-describedby="composer-status" placeholder="Transmit a message to Abyss..." value={input}
+            disabled={!current || busy || loading || interrupted} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}/>
+          <button className="send" title="Send message" aria-label="Send message" disabled={!selectedModel?.installed || !current || !bytes || bytes > 2500 || busy || loading || interrupted}>{busy ? '…' : <Icon name="send" size={28}/>}</button>
+        </form>
+        <div className="composer-status" id="composer-status">
+          <span>{status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…'}</span>
+          <span className={bytes > 2500 ? 'limit' : 'keyboard-hint'}>{bytes > 2500 ? `Message too long (${bytes}/2500 bytes)` : 'Shift + Enter for a new line'}</span>
+        </div>
       </div>
     </main>
   </div>;
