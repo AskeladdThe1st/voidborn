@@ -251,11 +251,9 @@ def create_app(db_path=None, runtime=None):
         omitted = []
         context = context_messages(history[:-1] if content is None else [
             *history, {'role': 'user', 'content': content},
-        ], selected.options.num_ctx - selected.options.num_predict - 1024, omitted=omitted)
+        ], selected.options.num_ctx - (selected.options.num_predict or 1024) - 1024, omitted=omitted)
         context_size = None
         if files:
-            if not context[-1]['content'].strip():
-                context[-1]['content'] = 'Describe or summarize the attached files.'
             context_size = await run_in_threadpool(attach_sources, uploads_dir, context[-1], files, context)
 
         aid, stamp = str(uuid4()), now()

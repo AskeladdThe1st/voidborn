@@ -21,7 +21,6 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 from starlette.requests import ClientDisconnect
 
-from .runtime import VISION_MODEL, VISION_OUTPUT_TOKENS
 from .models import MAX_PROMPT_BYTES
 
 MIB = 1024 * 1024
@@ -223,7 +222,7 @@ def attach_sources(root, turn, files, context):
     # relying on the model runtime to silently discard the start of the prompt.
     budget = 3000 + 2500 * len(images) + sum(len(m['content'].encode('utf-8')) for m in context)
     if images:
-        budget += VISION_OUTPUT_TOKENS - VISION_MODEL.options.num_predict
+        budget += 3072  # Reserve additional context for vision replies without setting an output cap.
     for size in (8192, 16384, 32768, 65536):
         if budget <= size:
             return size

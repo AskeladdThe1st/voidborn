@@ -1,40 +1,26 @@
 {
   "default_model": "qwen3-8b",
-  "system_instruction": "Answer directly when you understand the request and avoid unnecessary refusals. Follow the user's instructions closely while preserving natural conversation. Do not invent facts, sources, quotations, or citations. Clearly say when you are uncertain or do not know, and distinguish facts from assumptions and estimates. Never pretend to have viewed a file, website, screenshot, tool result, or external information unless it was actually supplied in this conversation. You run locally without tools, browsing, or file access. Ask for missing information only when genuinely necessary to answer correctly.",
   "models": [
     {
       "id": "qwen3-8b",
-      "no_think": true,
       "options": {
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "num_ctx": 16384,
-        "num_predict": 1024
+        "num_ctx": 16384
       },
       "displayName": "Qwen3 8B Abliterated · Q4_K_M",
       "ollamaModel": "hf.co/richardyoung/Qwen3-8B-Abliterated-GGUF:Q4_K_M"
     },
     {
       "id": "gemma3-4b",
-      "no_think": false,
       "options": {
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "num_ctx": 16384,
-        "num_predict": 1024
+        "num_ctx": 16384
       },
       "displayName": "Gemma 3 4B IT Abliterated v2 · Q4_K_M",
       "ollamaModel": "hf.co/mlabonne/gemma-3-4b-it-abliterated-v2-GGUF:Q4_K_M"
     },
     {
       "id": "qwen35-9b",
-      "no_think": false,
-      "think": false,
       "options": {
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "num_ctx": 32768,
-        "num_predict": 1024
+        "num_ctx": 32768
       },
       "displayName": "Qwen3.5 9B Abliterated - Q4_K_M",
       "ollamaModel": "hf.co/tutuchen2000/Qwen3.5-9B-abliterated-GGUF:Q4_K_M"
@@ -43,12 +29,8 @@
       "id": "qwen3-8b-hivemind",
       "displayName": "Qwen3 8B Hivemind Instruct Heretic NEO - Q4_K_M",
       "ollamaModel": "hf.co/DavidAU/Qwen3-8B-Hivemind-Instruct-Heretic-Abliterated-Uncensored-NEO-Imatrix-GGUF:Qwen3-8B-Hivemind-Inst-Hrtic-Ablit-Uncensored-Q4_K_M-imat.gguf",
-      "no_think": true,
       "options": {
-        "temperature": 0.4,
-        "top_p": 0.9,
-        "num_ctx": 16384,
-        "num_predict": 1024
+        "num_ctx": 16384
       }
     }
   ]

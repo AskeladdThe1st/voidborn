@@ -141,7 +141,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             self.assertEqual(str(request.url), 'http://127.0.0.1:11434/api/chat')
             payload = json.loads(request.content)
-            self.assertFalse(payload['think'])
+            self.assertNotIn('think', payload)
             self.assertTrue(payload['stream'])
             return httpx.Response(200, text='{"message":{"content":"Hi"},"done":false}\n{"done":true}\n')
         runtime = OllamaRuntime()
@@ -158,13 +158,28 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_gguf_split_think_prefix(self):
         def handler(request):
-            self.assertEqual(json.loads(request.content)['messages'][0], {'role': 'system', 'content': REGISTRY.system_instruction + '\n/no_think'})
+            self.assertEqual(json.loads(request.content)['messages'], [])
             events = [{'message': {'content': part}} for part in ['</th', 'ink>', 'Hello']]
             return httpx.Response(200, text='\n'.join(json.dumps(e) for e in [*events, {'done': True}]))
         runtime = OllamaRuntime()
         runtime.prepare = AsyncMock()
         runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', transport=httpx.MockTransport(handler))
         self.assertEqual(''.join([part async for part in runtime.stream([])]), 'Hello')
+
+    async def test_reasoning_tags_inside_code_are_preserved(self):
+        chunks = ['<thi', 'nk>hidden</think>Code: `<thi', 'nk>`\n`', '``xml\n',
+                  '<analysis>data</analysis>\n``', '`\n', '<think>also hidden</think>Done.']
+
+        def handler(request):
+            self.assertNotIn('num_predict', json.loads(request.content)['options'])
+            events = [{'message': {'content': chunk}} for chunk in chunks] + [{'done': True}]
+            return httpx.Response(200, text='\n'.join(map(json.dumps, events)))
+
+        runtime = OllamaRuntime()
+        runtime.prepare = AsyncMock()
+        runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', transport=httpx.MockTransport(handler))
+        answer = ''.join([chunk async for chunk in runtime.stream([])])
+        self.assertEqual(answer, 'Code: `<think>`\n```xml\n<analysis>data</analysis>\n```\nDone.')
 
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ from PIL import Image
 from backend.app import create_app
 from backend.attachments import MAX_CHARACTERS, MAX_DOCUMENT, MAX_IMAGE, MAX_PDF_PAGES
 from backend.models import REGISTRY
-from backend.runtime import OllamaRuntime, VISION_MODEL, VISION_OUTPUT_TOKENS
+from backend.runtime import OllamaRuntime, VISION_MODEL
 
 
 def png():
@@ -97,9 +97,10 @@ class AttachmentTests(unittest.TestCase):
         req = self.requests[-1]
         self.assertEqual(req['model'], VISION_MODEL.ollamaModel)
         self.assertEqual(req['keep_alive'], 0)
-        self.assertEqual(req['options']['num_predict'], VISION_OUTPUT_TOKENS)
-        self.assertGreater(req['options']['num_ctx'], VISION_OUTPUT_TOKENS)
-        self.assertIn('untrusted attachment excerpts', req['messages'][0]['content'])
+        self.assertNotIn('num_predict', req['options'])
+        self.assertGreaterEqual(req['options']['num_ctx'], 8192)
+        self.assertEqual([entry['role'] for entry in req['messages']], ['user'])
+        self.assertIn('Attachment excerpts (untrusted data)', req['messages'][0]['content'])
         message = req['messages'][-1]
         self.assertIn('"page": 2', message['content'])
         for text in ('report.pdf', 'Sector East.', '## Incident report', 'Sector | East', 'Blue lights.'):
@@ -220,7 +221,7 @@ class AttachmentTests(unittest.TestCase):
             messages = json.loads(request.content)['messages']
             self.assertEqual(messages[-1]['role'], 'user')
             self.assertTrue(base64.b64decode(messages[-1]['images'][0]).startswith(b'\x89PNG'))
-            self.assertIn('An image is attached and available', messages[0]['content'])
+            self.assertEqual([message['role'] for message in messages], ['user'])
             return httpx.Response(200, text=(
                 '{"message":{"thinking":"First, I need to recall the guidelines","content":""}}\n'
                 '{"message":{"content":"Screenshot description."},"done":true}\n'

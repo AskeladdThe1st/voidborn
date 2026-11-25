@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
@@ -138,21 +138,37 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         installed.clear()
         self.assertFalse((await runtime.status(selected.id))['ready'])
 
-    async def test_qwen35_native_thinking_control_and_automatic_offload(self):
+    async def test_qwen35_uses_native_thinking_and_sampling_by_default(self):
         selected = REGISTRY.get('qwen35-9b')
         def handler(request):
             body = json.loads(request.content)
             self.assertEqual(body['model'], selected.ollamaModel)
-            self.assertFalse(body['think'])
-            self.assertNotIn('/no_think', body['messages'][0]['content'])
+            self.assertNotIn('think', body)
+            self.assertEqual(body['messages'], [{'role': 'user', 'content': '  Original message.\n'}])
             self.assertNotIn('num_gpu', body['options'])
-            self.assertEqual(body['options']['temperature'], 0.4)
-            self.assertEqual(body['options']['top_p'], 0.9)
+            self.assertNotIn('temperature', body['options'])
+            self.assertNotIn('top_p', body['options'])
             return httpx.Response(200, text='{"message":{"content":"Hello"}}\n{"done":true}\n')
         runtime = OllamaRuntime()
         runtime.prepare = AsyncMock()
         runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', transport=httpx.MockTransport(handler))
-        self.assertEqual([part async for part in runtime.stream([], selected.id)], ['Hello'])
+        self.assertEqual([part async for part in runtime.stream([{'role': 'user', 'content': '  Original message.\n'}], selected.id)], ['Hello'])
+
+    async def test_explicit_system_prompt_is_passed_verbatim(self):
+        configured = REGISTRY.model_copy(update={'system_instruction': 'Custom system prompt.\n'})
+        messages = [{'role': 'user', 'content': 'My message.'}]
+
+        def handler(request):
+            self.assertEqual(json.loads(request.content)['messages'], [
+                {'role': 'system', 'content': configured.system_instruction}, *messages,
+            ])
+            return httpx.Response(200, text='{"message":{"content":"Hello"},"done":true}\n')
+
+        runtime = OllamaRuntime()
+        runtime.prepare = AsyncMock()
+        runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', transport=httpx.MockTransport(handler))
+        with patch('backend.runtime.REGISTRY', configured):
+            self.assertEqual([part async for part in runtime.stream(messages)], ['Hello'])
 
     async def test_unloads_other_model_before_generation_and_uses_model_options(self):
         selected = REGISTRY.get('gemma3-4b')
@@ -178,10 +194,9 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(loaded)
             self.assertEqual(body['model'], selected.ollamaModel)
             self.assertEqual(body['keep_alive'], 0)
-            self.assertEqual(body['options'], selected.options.model_dump())
+            self.assertEqual(body['options'], selected.options.model_dump(exclude_none=True))
             self.assertNotIn('think', body)
-            self.assertNotIn('/no_think', body['messages'][0]['content'])
-            self.assertIn('Do not invent facts', body['messages'][0]['content'])
+            self.assertEqual(body['messages'], [])
             return httpx.Response(200, text='{"message":{"content":"Hi"}}\n{"done":true}\n')
 
         runtime = OllamaRuntime()

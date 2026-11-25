@@ -8,10 +8,10 @@ MAX_PROMPT_BYTES = 128 * 1024
 
 class GenerationOptions(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    temperature: float = Field(default=0.4, ge=0, le=2)
-    top_p: float = Field(default=0.9, gt=0, le=1)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, gt=0, le=1)
     num_ctx: int = Field(default=4096, ge=4096, le=65536)
-    num_predict: int = Field(default=1024, ge=1, le=1024)
+    num_predict: int | None = Field(default=None, ge=1)
 
 
 class TextModel(BaseModel):
@@ -19,8 +19,6 @@ class TextModel(BaseModel):
     id: str = Field(pattern=r'^[a-z0-9-]+$')
     displayName: str = Field(min_length=1)
     ollamaModel: str = Field(min_length=1)
-    no_think: bool = False
-    # Native runtime control, separate from Qwen3's legacy /no_think prompt.
     think: bool | None = None
     options: GenerationOptions = Field(default_factory=GenerationOptions)
 
@@ -33,7 +31,7 @@ class TextModel(BaseModel):
 
 class Registry(BaseModel):
     default_model: str
-    system_instruction: str = Field(min_length=1)
+    system_instruction: str | None = Field(default=None, min_length=1)
     models: list[TextModel] = Field(min_length=1)
 
     @model_validator(mode='after')

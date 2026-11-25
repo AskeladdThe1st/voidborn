@@ -65,7 +65,7 @@ export default function Comparison({ models, busy, setBusy }) {
   return <section className="comparison" aria-label="Local model comparison">
     <h2>Compare local models</h2>
     <p>The same prompt, fresh context, one model at a time. Timing includes loading. Results and your ratings stay in this panel until you reload.</p>
-    <div className="model-installations">{models.map(m => <div key={m.id}><strong>{m.displayName}</strong> — {m.installed ? 'Installed' : 'Not installed'}<small>Temperature {m.options.temperature} · top_p {m.options.top_p}</small></div>)}</div>
+    <div className="model-installations">{models.map(m => <div key={m.id}><strong>{m.displayName}</strong> — {m.installed ? 'Installed' : 'Not installed'}<small>Temperature {m.options.temperature ?? 'model default'} · top_p {m.options.top_p ?? 'model default'}</small></div>)}</div>
     <form onSubmit={run}>
       <textarea aria-label="Comparison prompt" placeholder="Enter a factual question or a prompt with a known answer…" value={prompt} disabled={busy} onChange={e => setPrompt(e.target.value)}/>
       <button className="primary" disabled={busy || !installed.length || !prompt.trim() || bytes > MAX_PROMPT_BYTES}>{busy ? 'Comparing…' : `Compare ${installed.length} installed model${installed.length === 1 ? '' : 's'}`}</button>
