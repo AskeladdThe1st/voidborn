@@ -15,7 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .attachments import AttachmentError, attach_sources, parse_upload, remove_orphans, remove_upload, save_uploads, stored_path
 from .dictation import dictation_router
-from .runtime import ContextLimitError, OllamaRuntime, RuntimeErrorLocal, VISION_MISSING, VISION_MODEL, context_messages, model_from_catalog
+from .runtime import ContextLimitError, OllamaRuntime, RuntimeErrorLocal, VISION_MODEL, context_messages, model_from_catalog
 from .storage import Store
 from .models import MAX_PROMPT_BYTES, REGISTRY
 
@@ -122,7 +122,8 @@ def create_app(db_path=None, runtime=None):
     async def models():
         catalog = await model.catalog()
         vision = next((m for m in catalog['models'] if m['ollamaModel'] == VISION_MODEL.ollamaModel), None)
-        return {**catalog, 'vision': {'model': VISION_MODEL.ollamaModel, 'installed': bool(vision and vision['installed'])},
+        vision_status = await model.vision_status(bool(vision and vision['installed']), available=catalog['available'])
+        return {**catalog, 'vision': vision_status,
                 'models': [m for m in catalog['models'] if m['ollamaModel'] != VISION_MODEL.ollamaModel]}
 
     @app.post('/api/compare')
@@ -243,8 +244,9 @@ def create_app(db_path=None, runtime=None):
             files = store.attachment_sources(cid, previous['id'])
 
         if any(file.mime.startswith('image/') for file in files):
-            if not (await models())['vision']['installed']:
-                raise HTTPException(409, VISION_MISSING)
+            vision = (await models())['vision']
+            if not vision['ready']:
+                raise HTTPException(409, vision['detail'])
             selected = VISION_MODEL
         else:
             selected = await choose(model_id)

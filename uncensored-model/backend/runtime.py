@@ -10,8 +10,19 @@ from pydantic import ValidationError
 from .models import GenerationOptions, REGISTRY, TextModel
 
 RUNTIME_URL = 'http://127.0.0.1:11434'
-VISION_MODEL = TextModel(id='abyss-vision', displayName='Qwen3-VL 4B', ollamaModel='qwen3-vl:4b')
-VISION_MISSING = 'Image attachments require qwen3-vl:4b in local Ollama. Install it manually, then refresh models.'
+VISION_MODEL = TextModel(
+    id='abyss-vision', displayName='Qwen3-VL 30B-A3B Abliterated (Q4_K_M)',
+    ollamaModel='hf.co/mradermacher/Huihui-Qwen3-VL-30B-A3B-Instruct-abliterated-GGUF:Q4_K_M',
+)
+VISION_MISSING = f'Image attachments require {VISION_MODEL.displayName} in local Ollama. Install it manually, then refresh models.'
+VISION_UNSUPPORTED = f'Ollama does not report vision capability for {VISION_MODEL.displayName}. Check that the installed build includes vision support.'
+
+
+def verify_vision(metadata):
+    if 'vision' not in (metadata.get('capabilities') or []):
+        raise RuntimeErrorLocal(VISION_UNSUPPORTED)
+
+
 REASONING_TAGS = tuple(f'<{slash}{name}>' for name in ('think', 'thinking', 'analysis', 'reasoning')
                        for slash in ('', '/'))
 REASONING_DELIMITER = re.compile('|'.join([*map(re.escape, REASONING_TAGS), r'`+']), re.IGNORECASE)
@@ -138,6 +149,33 @@ class OllamaRuntime:
             return {'default_model': REGISTRY.default_model, 'available': False,
                     'models': [{**m.model_dump(), 'installed': False} for m in REGISTRY.models]}
 
+    async def vision_status(self, installed, *, available):
+        detail = VISION_MISSING if available else 'Could not read installed models from local Ollama. Check that Ollama is running, then refresh models.'
+        if installed:
+            try:
+                async with self.client() as client:
+                    metadata = await self.show_local_model(client, VISION_MODEL, timeout=3)
+                verify_vision(metadata)
+                detail = None
+            except RuntimeErrorLocal as exc:
+                detail = str(exc)
+            except httpx.TimeoutException:
+                detail = 'Ollama timed out while checking vision capability. Refresh models to retry.'
+            except (httpx.HTTPError, ValueError):
+                detail = 'Could not verify the local vision model with Ollama. Refresh models and try again.'
+        return {'model': VISION_MODEL.ollamaModel, 'displayName': VISION_MODEL.displayName,
+                'installed': installed, 'ready': detail is None, 'detail': detail}
+
+    async def show_local_model(self, client, selected, **request_options):
+        shown = await client.post('/api/show', json={'model': selected.ollamaModel}, **request_options)
+        shown.raise_for_status()
+        metadata = shown.json()
+        if not isinstance(metadata, dict):
+            raise ValueError('Expected an Ollama model information object.')
+        if metadata.get('remote_host') or metadata.get('remote_model') or not metadata.get('model_info'):
+            raise RuntimeErrorLocal('Only installed local models with local weights are allowed.')
+        return metadata
+
     async def status(self, model_id=None):
         catalog = await self.catalog()
         selected = model_from_catalog(catalog, model_id or REGISTRY.default_model)
@@ -151,11 +189,9 @@ class OllamaRuntime:
         tags.raise_for_status()
         if not any(m.get('name') == selected.ollamaModel for m in tags.json().get('models', [])):
             raise RuntimeErrorLocal(VISION_MISSING if selected == VISION_MODEL else 'Selected model is not installed. Follow README setup.')
-        shown = await client.post('/api/show', json={'model': selected.ollamaModel})
-        shown.raise_for_status()
-        metadata = shown.json()
-        if metadata.get('remote_host') or metadata.get('remote_model') or not metadata.get('model_info'):
-            raise RuntimeErrorLocal('Only installed local models with local weights are allowed.')
+        metadata = await self.show_local_model(client, selected)
+        if selected == VISION_MODEL:
+            verify_vision(metadata)
         running = await client.get('/api/ps')
         running.raise_for_status()
         for loaded in running.json().get('models', []):

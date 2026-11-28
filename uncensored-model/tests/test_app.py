@@ -14,7 +14,7 @@ from backend.runtime import OllamaRuntime, RuntimeErrorLocal, context_messages
 from backend.storage import Store
 
 
-class FakeRuntime:
+class FakeRuntime(OllamaRuntime):
     fail = False
     contexts = None
 

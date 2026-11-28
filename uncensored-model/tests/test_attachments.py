@@ -56,6 +56,8 @@ class AttachmentTests(unittest.TestCase):
         self.requests = []
         self.response_error = False
         self.modelfile = ''
+        self.capabilities = ['vision']
+        self.show_timeout = False
         self.chat_response = None
         self.runtime = OllamaRuntime()
         self.runtime.client = lambda: httpx.AsyncClient(base_url='http://127.0.0.1:11434', trust_env=False,
@@ -70,7 +72,9 @@ class AttachmentTests(unittest.TestCase):
         if request.url.path == '/api/tags':
             return httpx.Response(200, json={'models': [{'name': name} for name in self.tags]})
         if request.url.path == '/api/show':
-            return httpx.Response(200, json={'model_info': {'general.architecture': 'qwen'}, 'modelfile': self.modelfile})
+            if self.show_timeout:
+                raise httpx.ReadTimeout('test timeout', request=request)
+            return httpx.Response(200, json={'model_info': {'general.architecture': 'qwen'}, 'modelfile': self.modelfile, 'capabilities': self.capabilities})
         if request.url.path == '/api/ps':
             return httpx.Response(200, json={'models': []})
         self.assertEqual(request.url.path, '/api/chat')
@@ -142,12 +146,32 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(self.requests[-1]['options']['num_ctx'], self.model.options.num_ctx)
         self.assertEqual(self.requests[-1]['messages'][-1]['content'], 'Ordinary text')
 
+    def test_vision_capability_timeout_can_recover(self):
+        self.show_timeout = True
+        status = self.client.get('/api/models').json()['vision']
+        self.assertTrue(status['installed'])
+        self.assertFalse(status['ready'])
+        self.assertIn('timed out', status['detail'])
+        self.show_timeout = False
+        self.assertTrue(self.client.get('/api/models').json()['vision']['ready'])
+
+    def test_installed_model_without_vision_is_rejected(self):
+        self.capabilities = ['completion']
+        status = self.client.get('/api/models').json()['vision']
+        self.assertTrue(status['installed'])
+        self.assertFalse(status['ready'])
+        response = self.upload(('screen.png', png()))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('does not report vision capability', response.json()['detail'])
+        self.assertEqual(self.requests, [])
+
     def test_missing_vision_is_explicit_and_saves_nothing(self):
         self.tags.remove(VISION_MODEL.ollamaModel)
+        self.tags.append('qwen3-vl:4b')
         self.assertFalse(self.client.get('/api/models').json()['vision']['installed'])
         response = self.upload(('screen.png', png()))
         self.assertEqual(response.status_code, 409)
-        self.assertIn('require qwen3-vl:4b', response.json()['detail'])
+        self.assertIn(f'require {VISION_MODEL.displayName}', response.json()['detail'])
         self.assertEqual(self.client.get(self.url).json()['messages'], [])
         self.assertEqual(list(self.uploads.iterdir()), [])
         self.assertEqual(self.requests, [])

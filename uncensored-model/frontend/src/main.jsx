@@ -55,11 +55,26 @@ function App() {
 
   async function refreshModels() {
     const request = ++modelRefresh.current;
-    const catalog = await api('/models');
+    const signal = AbortSignal.timeout(8000);
+    let catalog;
+    try {
+      catalog = await api('/models', { signal });
+      if (!Array.isArray(catalog?.models)) throw new Error('Invalid model catalog');
+    } catch {
+      if (request === modelRefresh.current) {
+        setVision({ ready: false, detail: signal.aborted
+          ? 'The vision model check timed out. Click Refresh models to retry.'
+          : 'Could not check the local vision model. Check that Abyss is running, then click Refresh models.' });
+      }
+      throw new Error(signal.aborted ? 'Model check timed out.' : 'Could not load the local model catalog.');
+    }
     if (request !== modelRefresh.current) return;
     setModels(catalog.models);
     setRuntimeAvailable(catalog.available);
-    setVision(catalog.vision);
+    setVision(typeof catalog.vision?.ready === 'boolean' ? catalog.vision : {
+      ready: false,
+      detail: 'The running Abyss backend does not report vision readiness. Restart Abyss, then click Refresh models.',
+    });
     setModelId(old => {
       let saved = '';
       try { saved = localStorage.getItem('abyss-model') || localStorage.getItem('local-chat-model') || ''; } catch {}
@@ -89,9 +104,9 @@ function App() {
   const hasImage = attachments.some(item => isImageAttachment(item.file));
   const retryHasImage = interrupted && messages.findLast(m => m.role === 'user')?.attachments?.some(isImageAttachment);
   const canEdit = Boolean(current && !busy && !loading && !interrupted);
-  const canSend = canEdit && !dictating && (hasImage ? vision?.installed : selectedModel?.installed) &&
+  const canSend = canEdit && !dictating && (hasImage ? vision?.ready : selectedModel?.installed) &&
     (input.trim() || attachments.length > 0) && bytes <= MAX_PROMPT_BYTES;
-  const canRetry = !busy && !loading && (retryHasImage ? vision?.installed : selectedModel?.installed);
+  const canRetry = !busy && !loading && (retryHasImage ? vision?.ready : selectedModel?.installed);
 
   useLayoutEffect(() => {
     const textarea = composerInput.current;
@@ -385,7 +400,7 @@ function App() {
         </form>
         <div className="composer-status" id="composer-status">
           <span role={contextNotice ? 'status' : undefined}>{contextNotice || (hasImage || retryHasImage
-            ? (vision?.installed ? 'Images use qwen3-vl:4b locally' : 'Images require qwen3-vl:4b in local Ollama. Install it, then refresh models.')
+            ? (vision?.ready ? `Images use ${vision.displayName} locally` : vision ? (vision.detail || 'The local vision model is unavailable. Click Refresh models to retry.') : 'Checking the local vision model…')
             : (status?.ready ? 'Running locally · Conversations saved automatically' : status?.detail || 'Checking local runtime…'))}</span>
           <span className={bytes > MAX_PROMPT_BYTES ? 'limit' : 'keyboard-hint'}>{bytes > MAX_PROMPT_BYTES ? 'Draft exceeds the 128 KiB upload limit. Split it into smaller messages.' : 'Shift + Enter for a new line'}</span>
         </div>
